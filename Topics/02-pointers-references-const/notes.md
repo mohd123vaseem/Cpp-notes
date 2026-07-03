@@ -15,7 +15,7 @@ Everything in C++ that isn't a plain value involves pointers or references under
 | 1 | **Pointers** — what they are, `*` and `&`, `nullptr` | "What is a pointer?" | ✅ Done |
 | 2 | **References** — aliases, how they differ from pointers | "Pointer vs reference — when each?" | ✅ Done |
 | 3 | **`nullptr` vs `NULL` vs `0`** | "Why `nullptr` over `NULL`?" | ✅ Done |
-| 4 | ⭐ **const correctness** — `const int*` vs `int* const` vs `const int* const` | "Difference between the three?" | ⬜ Pending |
+| 4 | ⭐ **const correctness** — `const int*` vs `int* const` vs `const int* const` | "Difference between the three?" | ✅ Done |
 | 5 | **const member functions**, const params/returns, `mutable` | "What does a const member function guarantee?" | ⬜ Pending |
 
 > The ⭐ one (#4 — reading `const` right-to-left) is one of the most common C++ interview questions.
@@ -221,11 +221,19 @@ int* p = nullptr;   // ✅ genuinely a null pointer, type-safe
 void f(int n);      // overload A — integer
 void f(int* p);     // overload B — pointer
 
-f(NULL);     // ⚠️ calls f(int)!  NULL is just 0, an int
-f(0);        // ⚠️ calls f(int)!  same problem
-f(nullptr);  // ✅ calls f(int*)  — nullptr has pointer type
+f(0);        // ⚠️ calls f(int)!  0 is an int
+f(NULL);     // ⚠️ NON-PORTABLE — see below
+f(nullptr);  // ✅ calls f(int*)  — nullptr has pointer type (everywhere)
 ```
-You meant the pointer version, but `NULL`/`0` are integers so the compiler picks `f(int)`. `nullptr` resolves correctly.
+You meant the pointer version, but `0` is an integer so the compiler picks `f(int)`. `nullptr` resolves correctly.
+
+> 📖 **"Portable"** = code that behaves the **same no matter where you compile or run it** — different compilers (GCC, Clang, MSVC), OSes (Windows, Linux, Mac), or machines. *Non-portable* = behavior changes depending on the compiler/platform (bad).
+>
+> **`f(NULL)` isn't even portable** — because `NULL` is defined differently per compiler:
+> - **MSVC** (`#define NULL 0`): `NULL` is `int` `0` → silently calls `f(int)` (wrong overload).
+> - **GCC/Clang** (`#define NULL __null`): `__null` converts to *both* `int` and pointer → **ambiguous → compile error**.
+>
+> So `NULL` either picks the wrong overload *or* fails to compile, depending on the compiler. `nullptr` behaves correctly and identically everywhere. (GCC also warns `-Wconversion-null` on `int n = NULL;` for the same reason.)
 
 ### Other reasons `nullptr` wins
 - **Type safety** — won't silently convert to `int`:
@@ -247,9 +255,125 @@ You meant the pointer version, but `NULL`/`0` are integers so the compiler picks
 
 ---
 
+## Sub-topic 4 — const Correctness ⭐
+
+> ## `const` APPLIES TO WHATEVER IS ON ITS IMMEDIATE **LEFT**. IF THERE'S NOTHING ON ITS LEFT, IT APPLIES TO WHAT'S ON ITS **RIGHT**.
+
+*(This is THE rule for the whole sub-topic — everything below follows from it. A friendly shortcut is to "read the declaration right-to-left".)*
+
+One of the most-asked C++ interview questions. Read the declaration **right-to-left**, translating `*` → "pointer to" and `const` → "constant / read-only".
+
+Two independent things could be const:
+1. **The thing pointed to** (the value) — can I change it?
+2. **The pointer itself** — can I repoint it?
+
+### Case 1: `const int* p` — pointer to a const int
+Right-to-left: "`p` is a **pointer to** an **int** that is **const**." → **value read-only, pointer can move.**
+```cpp
+int a = 1, b = 2;
+const int* p = &a;
+*p = 5;      // ❌ ERROR — can't change the value through p
+p = &b;      // ✅ OK — can repoint
+```
+
+### Case 2: `int* const p` — const pointer to an int
+Right-to-left: "`p` is a **const** **pointer to** an **int**." → **pointer locked, value editable.**
+```cpp
+int a = 1, b = 2;
+int* const p = &a;   // must initialize now (can't reassign later)
+*p = 5;      // ✅ OK — value changes (a becomes 5)
+p = &b;      // ❌ ERROR — can't repoint
+```
+
+### Case 3: `const int* const p` — const pointer to a const int
+Right-to-left: "`p` is a **const** **pointer to** an **int** that is **const**." → **both locked.**
+```cpp
+const int* const p = &a;
+*p = 5;      // ❌ ERROR — value is const
+p = &b;      // ❌ ERROR — pointer is const
+```
+
+> ### ⚠️ IMPORTANT — const-ness belongs to the pointer's *type*, not its target
+>
+> With `const int* p`, the read-only-ness is part of **`p`'s type**, not tied to whatever it currently points at. `p` is a "pointer to const int" **forever** — repointing it doesn't change that.
+>
+> ```cpp
+> int a = 10, b = 5;
+> int const* p = &a;
+>
+> *p = 99;   // ❌ can't write through p
+> p = &b;    // ✅ repointed to b
+> *p = 42;   // ❌ STILL can't write through p — even though it now points to b!
+>
+> b = 42;    // ✅ but b itself isn't const, so change it directly
+> ```
+>
+> No matter what `p` points to, writing through it (`*p = ...`) is **always** forbidden — `p` only ever gives a **read-only view** of whatever it's aimed at. Think of `const int*` as **read-only glasses**: you can look at any int (repoint freely), but you can never *edit* what you're looking at; the object itself stays editable by its own name.
+
+### The trick to never mix them up
+- **`const` LEFT of the `*`** → the **data** is const (can't change `*p`).
+- **`const` RIGHT of the `*`** → the **pointer** is const (can't change `p`).
+```
+const int*  →  const left of *   →  data locked
+int* const  →  const right of *  →  pointer locked
+```
+
+### Why const correctness matters
+- **A promise the compiler enforces.** `const int* p` = "I'll only read, never write" — violating it is a compile error, not a runtime bug.
+- **The everyday use: `const T&` parameters.** `void print(const std::string& s);` passes read-only data cheaply *and* guarantees no mutation.
+- **It's contagious (good):** a `const` object can only call `const` members / pass to `const` params. Get it right early; bolting it on later is painful.
+
+### Summary
+| Declaration | Read as | Value editable? | Pointer movable? |
+|---|---|---|---|
+| `int* p` | pointer to int | ✅ yes | ✅ yes |
+| `const int* p` | pointer to const int | ❌ no | ✅ yes |
+| `int* const p` | const pointer to int | ✅ yes | ❌ no |
+| `const int* const p` | const pointer to const int | ❌ no | ❌ no |
+
+- Read **right-to-left**. `const` **left of `*`** → data locked; `const` **right of `*`** → pointer locked.
+- `const T&` params = pass cheaply + promise not to modify (the everyday use).
+
+> **Note:** `const int* p` and `int const* p` mean the **exact same thing** (const before or after the *type* is identical). Only the `const`'s position *relative to the `*`* matters.
+
+### The precise rule (better than "right-to-left")
+
+> ## `const` APPLIES TO WHATEVER IS ON ITS IMMEDIATE **LEFT**. IF THERE'S NOTHING ON ITS LEFT, IT APPLIES TO WHAT'S ON ITS **RIGHT**.
+
+```cpp
+const int* p;
+//  ^ const has NOTHING on its left → applies to the RIGHT: 'int'
+//  → const binds to int → "pointer to const int"
+
+int const* p;
+//      ^ const has 'int' on its left → applies to 'int'
+//  → const binds to int → "pointer to const int"
+```
+In both, `const` attaches to `int`; the `*` isn't involved → they're the **same**. ✅
+
+**The distinction that actually feels "wrong":** don't confuse `int const*` with `int* const` — the `*` position separates them:
+```cpp
+int const* p;    // const BEFORE * → pointer to const int  (DATA locked)
+int* const p;    // const AFTER  * → const pointer to int  (POINTER locked)
+```
+
+| Declaration | `const` vs `*` | Meaning |
+|---|---|---|
+| `const int* p` | before `*` | pointer to const int (data locked) |
+| `int const* p` | before `*` | **same** — pointer to const int (data locked) |
+| `int* const p` | **after** `*` | const pointer to int (pointer locked) |
+
+So `const int*` and `int const*` are **twins** (const on the same side of `*` — the left); `int* const` is the **odd one out** (const jumped to the right of `*`).
+
+- Moving `const` **around the type** (`const int` ↔ `int const`) → **no change**.
+- Moving `const` **across the `*`** (`int const*` ↔ `int* const`) → **completely different meaning**.
+
+---
+
 ## Code examples in this folder
 
 | File | Demonstrates |
 |------|--------------|
 | `references.cpp` | Alias behavior, the 3 reference rules (esp. rule 3: can't be null), pass-by-reference vs pass-by-pointer |
 | `nullptr_vs_null.cpp` | Overload resolution: `NULL`/`0` pick `f(int)`, `nullptr` picks `f(int*)`; the `int n = NULL` trap |
+| `const_pointers.cpp` | The 3 const-pointer combos + the key insight (const is part of the pointer's type, not its target) |

@@ -18,8 +18,14 @@ void f(int* p) { std::cout << "  f(int*) called with "
 
 int main() {
     std::cout << "f(0):       "; f(0);        // 0 is an int  -> f(int)
-    std::cout << "f(NULL):    "; f(NULL);     // NULL is 0    -> f(int)  (surprise!)
-    std::cout << "f(nullptr): "; f(nullptr);  // real pointer -> f(int*) (correct)
+
+    // f(NULL): NON-PORTABLE and shown here as a lesson (do NOT uncomment).
+    //   - On MSVC (NULL == 0):        would silently call f(int)   -- wrong overload
+    //   - On GCC/Clang (NULL==__null): AMBIGUOUS -> compile error  -- won't build
+    // Either way NULL is broken here. That's the whole point.
+    // f(NULL);   // ❌ leave commented
+
+    std::cout << "f(nullptr): "; f(nullptr);  // real pointer -> f(int*) (correct, everywhere)
 
     // Type safety: nullptr will NOT convert to int.
     // int n = nullptr;   // ❌ compile error (uncomment to see)
