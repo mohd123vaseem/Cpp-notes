@@ -1,0 +1,15 @@
+# Compiled binaries / build artifacts
+*.exe
+*.out
+*.o
+*.obj
+*.a
+*.lib
+*.dll
+a.exe
+a.out
+
+# Editor / OS
+.vscode/
+.DS_Store
+Thumbs.db
