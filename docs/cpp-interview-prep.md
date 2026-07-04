@@ -1,8 +1,26 @@
-# C++ Interview Prep — Master Roadmap
+# C++ Interview Prep — Master Roadmap (Merged)
 
 > Target: switching to any C++ company (~1 YOE, currently Chromium-based browser dev).
 > Structure: tiered by ROI. Generic C++ first (works for every company), Chromium bonus track at the end, with DSA + behavioral as parallel tracks.
 > Items marked **[ADDED]** are gaps filled in beyond the original list.
+> Items marked **[MERGED]** were folded in from the two-tracks syllabus (advanced/systems depth) — see the Priority Analysis below.
+
+---
+
+## Merge note + Priority Analysis (why the [MERGED] topics sit where they do)
+
+This doc is the **single canonical syllabus**. It keeps the roadmap's foundational coverage (pointers vs references, `nullptr` vs `NULL`, const member functions — which the two-tracks syllabus *assumed* you knew) and folds in the advanced/systems topics the two-tracks syllabus added. Placements below are **web-validated**, not guessed:
+
+| [MERGED] topic | What the research said | Placement decided | Why |
+|---|---|---|---|
+| **Systems fundamentals (OS layer)** — process vs thread, virtual memory/paging, scheduling, deadlock, `malloc`/fragmentation, IPC, CPU caches, futex | "Important for systems/FAANG; tests under-the-hood understanding; virtual memory meets pointers/malloc." | **Tier 3** (senior/systems signal); treat as **P1 for systems/FAANG** targets | Not asked in *every* C++ round, but a strong differentiator for the roles you want; plays to your systems background. |
+| **Operator overloading** | "Commonly appears in technical interviews." | **Tier 2** (differentiator) | Frequent enough to matter, not make-or-break. Pairs with Rule of 5. |
+| **pimpl idiom** | Known/useful technique; about hiding impl + cutting build deps. | **Tier 3** (under compilation/polymorphism) | Niche but a nice senior signal; low frequency. |
+| **Smart-pointer internals** ("write `shared_ptr` from scratch", atomic refcount, thread-safety) | Repeatedly flagged a top signal; "beyond manual memory management." | Deepened **Tier 1 #3** | Confirms it's core — added the from-scratch drill + control-block depth. |
+| **Storage duration** (automatic/static/dynamic/thread_local) | Part of the object-model core. | Folded into **Tier 1 #1** | Rounds out the memory model. |
+| **Browser Part B depth** (Mojo/IPC serialization, sandbox, site isolation, RBI/DOM mirroring, rendering pipeline) | Your niche edge for browser roles. | Expanded **Bonus Track** | Structured version of the browser add-on. |
+
+*Sources consulted: GeeksforGeeks (C++ & OS interview question sets), InterviewBit, Turing — see conversation for links. General C++ core (OOP, memory, STL, smart pointers, multithreading, templates, exceptions) was cross-confirmed as the universally-asked base and already anchors Tiers 1–2.*
 
 ---
 
@@ -25,6 +43,7 @@ For every topic, your daily note should answer four things:
 - `new`/`delete`, `new[]`/`delete[]`
 - **RAII** — the single most important C++ idiom (resource tied to object lifetime)
 - Memory leaks, dangling pointers, double-free, use-after-free
+- **[MERGED]** Object lifetime & **storage duration**: automatic, static, dynamic, thread-local
 - ⭐ Q: "What is RAII and why does C++ rely on it?" / "How do you prevent leaks without a garbage collector?"
 
 ### 2. ⭐ Pointers, references, const correctness
@@ -41,6 +60,8 @@ For every topic, your daily note should answer four things:
 - `weak_ptr` (breaking reference cycles)
 - `make_unique` / `make_shared` (and why preferred)
 - When to use which
+- **[MERGED]** Internals: why `unique_ptr` is zero-overhead; `shared_ptr` **control block + atomic refcount** (and its cost); thread-safety boundaries (refcount is atomic, the object is *not*)
+- **[MERGED]** ⭐ **Write a basic `shared_ptr` from scratch** — a classic whiteboard ask
 - ⭐ Q: "unique vs shared vs weak ptr?" / "How does shared_ptr's refcount work?" / "What's a shared_ptr cycle and how does weak_ptr fix it?"
 
 ### 4. ⭐ OOP + polymorphism + vtables
@@ -52,6 +73,8 @@ For every topic, your daily note should answer four things:
 - Static vs dynamic binding
 - **[ADDED]** RTTI and `dynamic_cast` (ties into vtables — how does the runtime know the real type?)
 - (Lighter: diamond problem, virtual inheritance)
+- `override` / `final`
+- **[MERGED]** **pimpl idiom** (pointer-to-implementation) — hides implementation, cuts build dependencies; ties to compilation model (#15)
 - ⭐ Q: "How do virtual functions work under the hood?" / "Why does a polymorphic base class need a virtual destructor?" / "What is object slicing?"
 
 ### 5. ⭐ Constructors/destructors + Rule of 0/3/5
@@ -129,7 +152,27 @@ For every topic, your daily note should answer four things:
 
 ---
 
+### 11b. ⭐ [MERGED] Operator overloading
+*Commonly appears; pairs naturally with the Rule of 5.*
+- Mechanics beyond copy/move assignment
+- Member vs non-member (free function) overloads
+- Common cases: `==`, `<`, `<<`, `[]`, `()`
+- Rule of thumb: intuitive, never surprising (mirror built-in semantics)
+- ⭐ Q: "When would you make an operator a member vs a free function?" / "How do you overload `<<` for your type?"
+
+---
+
 ## TIER 3 — Senior / systems signals
+
+### 11c. ⭐ [MERGED] Systems fundamentals (OS layer)
+*Tier 3 in general, but treat as **P1 for systems / FAANG** targets — plays directly to your background.*
+- Process vs thread; context switching; scheduling basics
+- **Virtual memory & paging** (where the "virtual address space" from stack-vs-heap really lives)
+- `malloc` / allocators — arenas, fragmentation; `mmap`
+- **IPC** — pipes, shared memory, sockets, message passing
+- CPU caches — hierarchy, cache lines, spatial/temporal locality, what causes misses
+- Futex underneath mutexes
+- ⭐ Q: "process vs thread?" / "what happens on a page fault?" / "how would you debug an OOM kill / a slow server?" / "what causes cache misses?"
 
 ### 12. Undefined behavior
 - What UB is and why it's dangerous
@@ -235,10 +278,22 @@ For every topic, your daily note should answer four things:
 - ⭐ Talking point: "BindOnce gives move-only callbacks and can bind to a WeakPtr so the call is silently dropped if the target died — std::function can't express either cleanly."
 
 ### Architecture (lighter — only if you've touched it)
-- Multi-process model (browser / renderer / GPU / utility), the sandbox
-- **Mojo** IPC — interface definition, message passing across processes
-- Site isolation at a high level
+- Multi-process model (browser / renderer / GPU / network / utility), and **why** (stability + security via sandboxing)
+- **Mojo** IPC — interface definition, message passing across processes; **[MERGED]** serialization / marshalling across process boundaries (how structured data crosses safely)
+- **[MERGED]** Sandbox as a security boundary — what the renderer can / can't do
+- Site isolation — process-per-site-instance, and why
 - ⭐ Talking point: even a high-level "why a browser is multi-process" answer (security + stability isolation) signals systems maturity.
+
+### [MERGED] Browser security / isolation (only for isolation companies: Menlo, Island, Palo Alto, Cloudflare)
+- The DOM as an attack surface
+- Remote Browser Isolation (RBI) & **DOM mirroring** vs pixel streaming
+- Exploit / sandbox-escape threat model at a high level
+- TLS/HTTPS, proxies, how traffic is intercepted / inspected
+
+### [MERGED] Rendering pipeline (light — only for graphics-heavy roles: Chrome graphics, Figma, engines)
+- Parse → layout → paint → composite, at a high level
+- GPU process role; frame-timing basics
+- *Keep light unless targeting a dedicated graphics team.*
 
 ---
 
@@ -251,3 +306,14 @@ For every topic, your daily note should answer four things:
 5. **Tier 3 + LLD patterns** — senior signal.
 6. **Chromium bonus track** — folds into the above as your edge; doesn't need its own block of time.
 7. **Tier 4** — only for HFT / deep-systems targets.
+
+---
+
+## [MERGED] Recommended resources
+| Resource | Use for | Priority |
+|----------|---------|----------|
+| **Effective Modern C++** — Scott Meyers | Language depth (Tier 1/2) | Essential |
+| **C++ Concurrency in Action** — Anthony Williams | Concurrency (#9, #14) | Essential |
+| cppreference.com | Reference | Daily |
+| CppCon talks (YouTube) | Deep dives | As needed |
+| Compiler Explorer (godbolt.org) | See the assembly your C++ generates (move, vtables, RVO, padding) | When relevant |
