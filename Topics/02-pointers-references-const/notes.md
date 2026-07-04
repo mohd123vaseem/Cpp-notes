@@ -16,7 +16,7 @@ Everything in C++ that isn't a plain value involves pointers or references under
 | 2 | **References** — aliases, how they differ from pointers | "Pointer vs reference — when each?" | ✅ Done |
 | 3 | **`nullptr` vs `NULL` vs `0`** | "Why `nullptr` over `NULL`?" | ✅ Done |
 | 4 | ⭐ **const correctness** — `const int*` vs `int* const` vs `const int* const` | "Difference between the three?" | ✅ Done |
-| 5 | **const member functions**, const params/returns, `mutable` | "What does a const member function guarantee?" | ⬜ Pending |
+| 5 | **const member functions**, const params/returns, `mutable` | "What does a const member function guarantee?" | ✅ Done |
 
 > The ⭐ one (#4 — reading `const` right-to-left) is one of the most common C++ interview questions.
 
@@ -367,6 +367,107 @@ So `const int*` and `int const*` are **twins** (const on the same side of `*` �
 
 - Moving `const` **around the type** (`const int` ↔ `int const`) → **no change**.
 - Moving `const` **across the `*`** (`int const*` ↔ `int* const`) → **completely different meaning**.
+
+---
+
+## Sub-topic 5 — const Member Functions, const Params/Returns & `mutable`
+
+Where `const` moves from pointers to **classes** — the everyday, professional use.
+
+### Part 1 — const member functions
+A **const member function** promises *"calling me won't modify the object."* Mark it with `const` **after** the parameter list:
+```cpp
+class Rectangle {
+    int width_, height_;
+public:
+    int area() const { return width_ * height_; }  // const: only reads
+    void setWidth(int w) { width_ = w; }            // NOT const: modifies
+};
+```
+The compiler **enforces** it — inside a const member function, **every member variable is treated as read-only** (except `mutable` ones):
+```cpp
+class Rectangle {
+    int width_, height_;
+public:
+    void shrink() const {   // const method
+        width_ = 0;         // ❌ error — can't modify width_
+        height_ = 0;        // ❌ error — can't modify height_ either
+    }
+};
+```
+So *"const makes the object const"* means: for the duration of that call, the **whole object is frozen** — `width_`, `height_`, all of them become read-only. Not one member — every member at once. (Only `mutable` members stay changeable — the escape hatch.) Think of it as: `const` after the function puts **read-only glasses on the entire object** while that function runs.
+
+**Why it matters — const objects can only call const methods:**
+```cpp
+void printArea(const Rectangle& r) {   // r is const
+    r.area();       // ✅ area() is const
+    r.setWidth(5);  // ❌ error — setWidth() isn't const
+}
+```
+Since `const T&` params are everywhere, any read-only method **must** be marked `const` or it's unusable on const objects. *That* is const correctness in practice.
+
+**const overloading** (how `vector::operator[]` works):
+```cpp
+char& at(int i)       { return data_[i]; }  // non-const: writable
+char  at(int i) const { return data_[i]; }  // const: read-only
+```
+
+### Part 2 — const params and const returns
+- **const ref parameter — the everyday one:** `void print(const std::string& s);` → pass by reference (no copy) **and** promise not to modify. Use for any non-trivial read-only object.
+- **const by value** (`const int n`) is legal but rarely useful (only stops reassigning the local copy).
+- **const return (reference/pointer):** matters because returning a **reference** hands the caller an *alias to your private member*, not a copy — so they could write straight into your internals. `const` makes that alias read-only:
+  ```cpp
+  std::string&       name()       { return name_; }  // ⚠️ caller gets an alias to name_
+  p.name() = "hacked";                               //    → this MODIFIES name_! encapsulation broken
+
+  const std::string& name() const { return name_; }  // ✅ read-only alias (no copy)
+  p.name() = "hacked";                               //    ❌ compile error — name_ protected
+  ```
+  Returning `const` **by value** (`std::string name()`) is pointless — the caller gets their own copy to do as they like, disconnected from `name_`.
+
+  | Return type | Caller gets | Can modify your member? |
+  |---|---|---|
+  | `std::string& name()` | alias to `name_` | ❌ **Yes — dangerous** |
+  | `const std::string& name() const` | read-only alias (no copy) | No — safe |
+  | `std::string name() const` | a copy | Irrelevant → `const` here is pointless |
+
+### Part 3 — `mutable` (the escape hatch)
+Lets a specific member be modified **even inside a const method** — for internal bookkeeping (cache, counter, mutex) that isn't part of the object's logical state:
+```cpp
+class Database {
+    mutable int queryCount_ = 0;   // can change even in const methods
+public:
+    std::string lookup(const std::string& key) const {  // logically const
+        ++queryCount_;             // ✅ allowed — queryCount_ is mutable
+        return doLookup(key);
+    }
+};
+```
+
+**Logical vs bitwise const** (the concept behind `mutable`):
+- **Bitwise const** — not a single bit changes.
+- **Logical const** — the object's *observable meaning* doesn't change, even if a hidden internal does.
+
+A const member function guarantees **logical** const, not bitwise. `mutable` marks a member as "implementation detail, not logical state." Common uses: caching, thread-safety `mutex`es, stats counters. ⚠️ Don't use it for anything that changes the object's real meaning.
+
+### ⚠️ const is SHALLOW
+In a const method, a pointer member `int* p_` becomes `int* const` (the **pointer** is const) — **not** `const int*`. So you can still do `*p_ = 5`. const protects the pointer, not what it points to.
+
+### Interview-depth follow-ups
+- *"Bitwise or logical const?"* → **Logical.** `mutable` members can change; pointer members' pointees stay writable (shallow).
+- *"Why `mutable` for a `std::mutex` in a const method?"* → Locking modifies the mutex, but a read op should stay `const`; `mutable` allows it.
+
+### Summary
+| Feature | Syntax | Meaning |
+|---|---|---|
+| const member function | `int area() const` | "won't modify the object" (enforced) |
+| const ref parameter | `void f(const T& x)` | pass without copying + won't modify — the everyday one |
+| const return (ref) | `const T& get() const` | caller can read, not modify internals |
+| `mutable` member | `mutable int n_;` | can change even in const methods (caches, counters, mutexes) |
+
+- Mark **every** non-modifying method `const` — or it can't be called on const objects.
+- const method = **logical** const, not bitwise; `mutable` is the escape hatch.
+- const is **shallow**: a pointer member's pointee is still writable in a const method.
 
 ---
 
