@@ -397,14 +397,30 @@ public:
 ```
 So *"const makes the object const"* means: for the duration of that call, the **whole object is frozen** — `width_`, `height_`, all of them become read-only. Not one member — every member at once. (Only `mutable` members stay changeable — the escape hatch.) Think of it as: `const` after the function puts **read-only glasses on the entire object** while that function runs.
 
-**Why it matters — const objects can only call const methods:**
+**Why it matters — the calling rule (asymmetric):**
+
+| Object type | Can it call a **const** method? | Can it call a **non-const** method? |
+|---|---|---|
+| **non-const** object (`Rectangle r;`) | ✅ YES | ✅ YES |
+| **const** object (`const Rectangle r;`) | ✅ YES | ❌ NO |
+
+Read the table, not a sentence. Two plain facts:
+1. A **const method** can be called by **any** object (const or non-const). It never requires the object to be const.
+2. A **const object** is the restricted one: it can call const methods, but NOT non-const methods.
+
 ```cpp
-void printArea(const Rectangle& r) {   // r is const
-    r.area();       // ✅ area() is const
-    r.setWidth(5);  // ❌ error — setWidth() isn't const
-}
+Rectangle r;              // non-const object
+r.area();                 // ✅ const method on non-const object — fine
+r.setWidth(5);            // ✅ non-const method on non-const object — fine
+
+const Rectangle cr;       // const object
+cr.area();                // ✅ const method on const object — fine
+cr.setWidth(5);           // ❌ ERROR — non-const method on a const object
 ```
-Since `const T&` params are everywhere, any read-only method **must** be marked `const` or it's unusable on const objects. *That* is const correctness in practice.
+
+The only illegal combo is the ❌ one: **non-const method called on a const object.** Everything else is allowed.
+
+Since `const T&` params are everywhere (they make the object const inside the function), any read-only method **must** be marked `const` — otherwise it can't be called when someone holds a const object. *That* is const correctness in practice.
 
 **const overloading** (how `vector::operator[]` works):
 ```cpp
