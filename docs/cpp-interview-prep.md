@@ -294,8 +294,6 @@ For every topic, your daily note should answer four things:
 4. **Behavioral stories** — cheap to prep, high payoff, guaranteed to come up.
 5. **Tier 3 + LLD patterns** — senior signal.
 6. **Chromium bonus track** — folds into the above as your edge; doesn't need its own block of time.
-7. **Tier 4** — only for HFT / deep-systems targets.
-
 ---
 
 ## [MERGED] Recommended resources
