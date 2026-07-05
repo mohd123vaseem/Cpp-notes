@@ -211,17 +211,6 @@ For every topic, your daily note should answer four things:
 
 ---
 
-## TIER 4 — Advanced
-*Only if targeting HFT / deep systems. Skip unless you've cleared Tiers 1–3 or your targets are trading firms.*
-
-- Template metaprogramming: SFINAE, type traits, variadic templates, C++20 concepts
-- CRTP, type erasure
-- Custom allocators, placement new, alignment
-- Performance: cache optimization, branch prediction
-- C++20: ranges, coroutines, modules
-
----
-
 ## PARALLEL TRACK A — DSA / coding rounds
 *This is the actual first gate for most switches. Mastering every concept above won't help if a medium graph problem filters you in round one. Schedule this as real daily practice, not an afterthought.*
 
