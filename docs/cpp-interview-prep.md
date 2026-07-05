@@ -246,43 +246,73 @@ For every topic, your daily note should answer four things:
 ---
 
 ## BONUS TRACK — Chromium / browser-internals edge
-*You're targeting all C++ companies, so this isn't core — but it's your single biggest differentiator. When a generic question comes up, answering with both the textbook version **and** "here's how a real browser does it" sounds senior at 1 YOE. Map each item back to the generic topic it strengthens.*
-
-### Smart pointers → Chromium's ownership model
-- `scoped_refptr` / `base::RefCounted` — **intrusive** refcounting. Great compare-and-contrast vs `shared_ptr`'s external control block (refcount lives *in* the object vs in a separate block).
-- `base::WeakPtr` — sequence-checked, invalidates safely on the owning sequence (vs `std::weak_ptr` which is purely about refcount lifetime).
-- `raw_ptr` (MiraclePtr/BackupRefPtr) — Chromium's hardened raw pointer for use-after-free mitigation.
-- ⭐ Talking point: "shared_ptr uses an external control block with atomic refcounts; Chromium's scoped_refptr is intrusive — the count lives in the object, which saves an allocation but requires the type to opt in."
-
-### Concurrency → the threading model
-- Sequences vs physical threads — the key mental model. Work runs on a *sequence* (ordered, not necessarily same thread) rather than you grabbing locks.
-- `TaskRunner` / `SequencedTaskRunner`, posting tasks
-- `SequenceChecker` / `ThreadChecker` — how thread-safety is *asserted* rather than locked
-- Why this design exists: avoids lock contention and whole classes of races by construction
-- ⭐ Talking point: when asked "make this thread-safe," give the `std::mutex` answer, then: "in a browser we'd often avoid the lock entirely by confining the object to one sequence and posting tasks to it."
-
-### Callbacks → why not std::function
-- `base::BindOnce` / `base::BindRepeating`, `base::OnceCallback` / `RepeatingCallback`
-- Why over `std::function`: move-only support, weak-ptr binding (auto-cancel if receiver is gone), explicit once-vs-repeating semantics
-- ⭐ Talking point: "BindOnce gives move-only callbacks and can bind to a WeakPtr so the call is silently dropped if the target died — std::function can't express either cleanly."
-
-### Architecture (lighter — only if you've touched it)
-- Multi-process model (browser / renderer / GPU / network / utility), and **why** (stability + security via sandboxing)
-- **Mojo** IPC — interface definition, message passing across processes; **[MERGED]** serialization / marshalling across process boundaries (how structured data crosses safely)
-- **[MERGED]** Sandbox as a security boundary — what the renderer can / can't do
-- Site isolation — process-per-site-instance, and why
-- ⭐ Talking point: even a high-level "why a browser is multi-process" answer (security + stability isolation) signals systems maturity.
-
-### [MERGED] Browser security / isolation (only for isolation companies: Menlo, Island, Palo Alto, Cloudflare)
-- The DOM as an attack surface
-- Remote Browser Isolation (RBI) & **DOM mirroring** vs pixel streaming
-- Exploit / sandbox-escape threat model at a high level
-- TLS/HTTPS, proxies, how traffic is intercepted / inspected
-
-### [MERGED] Rendering pipeline (light — only for graphics-heavy roles: Chrome graphics, Figma, engines)
-- Parse → layout → paint → composite, at a high level
-- GPU process role; frame-timing basics
-- *Keep light unless targeting a dedicated graphics team.*
+*Re-scoped for a **browser-company** target (any tier, mid-level ok): this is no longer just "flavor for generic C++ roles" — it's a **core study block**, because browser interviews probe it directly. The **P0 → P2 ordering below is based on interview analysis**: Chromium onboarding/architecture docs, Chromium-internals writeups, and browser-role job descriptions, which consistently list "rendering, networking, multi-process architecture, system integrations, build systems." The most heavily and consistently probed area is **multi-process architecture + Mojo IPC** — everything else ranks under it.*
+ 
+*Calibration for mid-level: you need **fluent literacy** across P0/P1 and the ability to tie each topic back to what you actually shipped — **not** mastery of every internal. Go deep only in the P2 area that matches your specific target company. The three C++-idiom items still double as browser-flavored answers to generic C++ questions — see the "Generic-topic mappings" at the end.*
+ 
+### ▸ P0 — Core: expected in essentially every browser interview
+ 
+#### B1. Multi-process architecture  *(promoted from "optional" — this IS the conversation)*
+- Process types and roles: **browser** (privileged broker), **renderer** (one per site-instance, sandboxed), **GPU**, **utility / service**, **network service** — and **why** the split exists (stability + security, like a modern OS isolating apps: one bad tab can't take down the browser).
+- The host/impl object model: `RenderProcessHost`/`RenderProcess`, `RenderFrameHost`/`RenderFrame`, and **routing IDs** (identifying a frame needs host + routing ID together).
+- Renderer crash → "sad tab"; process-per-site-instance; process-reuse strategies (e.g. `window.open` same-origin sharing).
+- ⭐ Q to nail: "Why is a browser multi-process?" / "What processes exist and what does each do?"
+#### B2. Mojo IPC  *(the primary IPC system — legacy IPC is deprecated)*
+- `.mojom` interface definitions, message pipes, browser↔renderer communication, passing object handles (file descriptors) safely across the boundary.
+- **Async by default**; why **synchronous browser→renderer IPC is disallowed** (never block the UI on a flaky renderer); sync messages handled only on the I/O thread.
+- Why Mojo replaced legacy IPC: endpoint-to-endpoint, no giant routing/plumbing classes, faster, fewer context switches.
+- ⭐ Talking point: "structured data crosses the process boundary via mojom-generated serialization, and the browser validates it because the renderer is untrusted."
+#### B3. In-process threading model
+- Browser process: **UI thread**, **I/O thread** (handles IPC + resource requests off the UI thread so the UI stays responsive), plus worker/pool threads.
+- Renderer: **main thread** (JS / DOM / style / layout) + **compositor** and **raster** threads.
+- Sequences vs physical threads *(cross-ref the Concurrency mapping below — the key mental model)*; why the main thread must never block.
+- ⭐ Talking point: "resource requests run on the I/O thread precisely so the UI thread never stalls."
+### ▸ P1 — Strongly expected: know the high-level version even if you never touched that code
+ 
+#### B4. Sandboxing & site isolation  *(promoted from "isolation companies only" — broadly asked now)*
+- Sandbox as a security boundary: what a renderer **can't** do (no direct filesystem / network / display access) and how it asks the browser to broker those.
+- **Site Isolation / OOPIFs** (out-of-process iframes): cross-site documents in distinct renderers; the browser mediates cross-process input, hit-testing, focus, navigation.
+- ⭐ Q: "How does Chromium stop a compromised renderer from reading another site's data?"
+#### B5. Rendering pipeline literacy  *(promoted from "graphics roles only")*
+- Parse (HTML→DOM, CSS→CSSOM) → **style** → **layout** → **paint** (records display items, not pixels) → **composite** → **raster** → GPU/Viz.
+- Main thread vs compositor thread; what triggers **reflow / repaint** and causes **jank**.
+- ⭐ Q: "What happens between HTML arriving and pixels on screen?" — you need the *map*, not Blink internals.
+#### B6. Navigation & page lifecycle  *(added — near-guaranteed "URL → pixels")*
+- End-to-end: DNS / connection → network-service fetch → response → renderer selection/commit → parse → render.
+- Which process participates at each step; what the browser brokers vs what the renderer does.
+#### B7. Ownership model & callbacks  *(your existing strength — keep; cross-ref the C++ tiers)*
+- `scoped_refptr` / `base::RefCounted`, `base::WeakPtr`, `raw_ptr` (MiraclePtr); `base::BindOnce` / `BindRepeating` with weak-ptr auto-cancel. Full compare/contrast in "Generic-topic mappings" below.
+### ▸ P2 — Role-dependent differentiators: study the ONE matching your target company
+ 
+#### B8. Build system & upstream tracking  *(added — heavily valued by any company that forks Chromium)*
+- **GN** + **Ninja**, `depot_tools` / `gclient`, component vs static builds, incremental compilation, cross-platform build flags.
+- Rebasing / merging a fork onto upstream Chromium — the recurring pain at every non-Google browser shop.
+- ⭐ Why it matters: JDs explicitly list "build systems, CI/CD, alignment with upstream Chromium updates."
+#### B9. Networking / resource loading  *(added)*
+- The out-of-process **network service**, `URLLoaderFactory`, and **why** networking moved out of the browser process (shrink attack surface — HTTP parsing sits close to attacker-controlled content).
+- Caching, resource-fetch flow, cookies.
+#### B10. Embedding — CEF / WebView / content layer  *(added — central for enterprise / kiosk / embedded shops)*
+- The **content** public API (embedder-facing layer), **CEF** (Chromium Embedded Framework), Android **WebView**.
+- Where you hook customizations without patching the engine.
+#### B11. Security deep-dive  *(only for isolation companies: Menlo, Island, Palo Alto, Cloudflare)*
+- DOM as attack surface; Remote Browser Isolation (RBI) & **DOM mirroring** vs pixel streaming; sandbox-escape threat model; TLS/HTTPS proxies, traffic interception/inspection.
+#### B12. Deep rendering internals  *(only for dedicated graphics teams: Chrome graphics, engines)*
+- Blink layout/paint internals, LayoutNG, GPU command buffer / Viz, frame-timing.
+---
+ 
+### Generic-topic mappings  *(answer a generic C++ question, then add "…and here's how a browser does it")*
+ 
+**Smart pointers → Chromium's ownership model**
+- `scoped_refptr` / `base::RefCounted` — **intrusive** refcounting vs `shared_ptr`'s external control block (count lives *in* the object: saves an allocation, requires the type to opt in).
+- `base::WeakPtr` — sequence-checked, invalidates safely on the owning sequence (vs `std::weak_ptr`, purely refcount lifetime).
+- `raw_ptr` (MiraclePtr/BackupRefPtr) — hardened raw pointer for use-after-free mitigation.
+- ⭐ "shared_ptr uses an external control block with atomic refcounts; scoped_refptr is intrusive — the count lives in the object, saving an allocation but requiring opt-in."
+**Concurrency → the threading model**
+- Sequences vs physical threads; `TaskRunner` / `SequencedTaskRunner`; `SequenceChecker` / `ThreadChecker` (thread-safety *asserted*, not locked) — avoids lock contention and whole classes of races by construction.
+- ⭐ When asked "make this thread-safe": give the `std::mutex` answer, then "in a browser we'd often confine the object to one sequence and post tasks to it instead of locking."
+**Callbacks → why not std::function**
+- `base::BindOnce` / `BindRepeating`, `OnceCallback` / `RepeatingCallback`; move-only support, weak-ptr binding (auto-cancel if receiver is gone), explicit once-vs-repeating semantics.
+- ⭐ "BindOnce gives move-only callbacks and can bind to a WeakPtr so the call is silently dropped if the target died — std::function can't express either cleanly."
 
 ---
 
