@@ -15,8 +15,8 @@ Modern C++ almost never uses raw `new`/`delete`. Smart pointers express **owners
 | 1 | **`unique_ptr`** — sole ownership, move-only, zero-overhead | "Why is `unique_ptr` zero-cost?" | ✅ Done |
 | 2 | **`shared_ptr`** — reference counting, the control block, atomic refcount + cost | "How does `shared_ptr`'s refcount work?" | ✅ Done |
 | 3 | **`weak_ptr`** — breaking reference cycles | "What's a `shared_ptr` cycle and how does `weak_ptr` fix it?" | ✅ Done |
-| 4 | **`make_unique` / `make_shared`** — why preferred | "Why prefer `make_shared` over `new`?" | ⬜ Pending |
-| 5 | **When to use which** — the ownership decision | "unique vs shared vs weak — when each?" | ⬜ Pending |
+| 4 | **`make_unique` / `make_shared`** — why preferred | "Why prefer `make_shared` over `new`?" | ✅ Done |
+| 5 | **When to use which** — the ownership decision | "unique vs shared vs weak — when each?" | ✅ Done |
 | 6 | ⭐ **Write a basic `shared_ptr` from scratch** | "Sketch a minimal `shared_ptr`." | ⬜ Pending |
 
 > Sub-topic 6 is the deep one — the highest-yield piece where interviewers separate people who *use* smart pointers from people who *understand* them.
@@ -239,6 +239,101 @@ A captured `shared_ptr` would keep the listener alive (maybe forever); `weak_ptr
 - Fix a cycle by making **one** link weak.
 - Can't dereference — call **`lock()`** (valid `shared_ptr` if alive, `nullptr` if gone).
 - The **weak count** keeps the *control block* alive (not the object) so liveness checks stay safe.
+
+---
+
+## Sub-topic 4 — `make_unique` / `make_shared`
+
+Factory functions that create the object and wrap it in a smart pointer in one step:
+```cpp
+auto u = std::make_unique<Widget>(a, b);   // = unique_ptr<Widget>(new Widget(a, b))
+auto s = std::make_shared<Widget>(a, b);   // = shared_ptr<Widget>(new Widget(a, b))
+```
+Arguments go straight to the object's constructor. **Prefer these over raw `new`** — three reasons:
+
+### Reason 1 — Exception safety (the subtle one)
+```cpp
+foo(std::shared_ptr<A>(new A()), std::shared_ptr<B>(new B()));   // ⚠️ risky
+```
+The compiler may order this: `new A()`, `new B()`, then wrap each. If `new B()` **throws** after `A` is allocated but before it's wrapped, the raw `A` has no owner → **leak**. `make_shared` allocates + wraps together (no unowned gap):
+```cpp
+foo(std::make_shared<A>(), std::make_shared<B>());   // ✅ leak-safe
+```
+
+### Reason 2 — `make_shared` = single allocation
+A `shared_ptr` needs the **object** + a **control block** on the heap:
+- `shared_ptr<Widget>(new Widget())` → **two** allocations (object, then control block).
+- `make_shared<Widget>()` → **one** allocation holding both together.
+```
+new + shared_ptr:  [Widget]  [ctrl]     (2 allocations)
+make_shared:       [Widget | control block]   (1 allocation → faster, better locality)
+```
+(N/A for `make_unique` — no control block — but it still wins on Reasons 1 & 3.)
+
+### Reason 3 — Cleaner, no raw `new`
+```cpp
+std::unique_ptr<Widget> a(new Widget());   // raw new, type repeated
+auto a = std::make_unique<Widget>();       // no new, type once
+```
+No `new` in your code → no mismatch, no forgotten cleanup.
+
+### The one downside of `make_shared`
+Object + control block share **one** allocation, so that memory isn't freed until **both** counts hit 0:
+> Large object + a **`weak_ptr` that outlives all `shared_ptr`s** → the object's memory stays allocated (even though the object is destroyed) until the last `weak_ptr` dies. With separate `new`, the object's memory frees as soon as strong = 0. So for **big objects with long-lived `weak_ptr`s**, plain `new` can release memory sooner.
+
+### Summary
+| | `make_unique` | `make_shared` |
+|---|---|---|
+| Exception-safe (no leak gap) | ✅ | ✅ |
+| Single allocation | n/a (no ctrl block) | ✅ object + ctrl together |
+| No raw `new`, cleaner | ✅ | ✅ |
+| Downside | — | big object + long-lived `weak_ptr` → memory held longer |
+
+- **Default to `make_unique` / `make_shared`.** Wins: exception safety, one allocation (`make_shared`), cleaner code.
+- Only exception: `make_shared` with a big object + outliving `weak_ptr`s → prefer `new`.
+
+---
+
+## Sub-topic 5 — When to Use Which
+
+The decision is driven by **one question: who owns this?**
+
+```
+Do you OWN the object (responsible for deleting it)?
+│
+├─ NO → just observing/using it; someone else owns it
+│        ├─ owner might destroy it while you hold it? → weak_ptr (lock() to use safely)
+│        └─ guaranteed alive while you use it?        → raw pointer (T*) or reference (T&)
+│
+└─ YES → alone or shared?
+         ├─ ALONE  → unique_ptr   ← the DEFAULT
+         └─ SHARED → shared_ptr
+```
+
+| Use | When | Meaning |
+|-----|------|---------|
+| **`unique_ptr`** | one clear owner (**default** for owning a heap object) | "I own this, exclusively" |
+| **`shared_ptr`** | ownership genuinely shared; dies when the *last* owner leaves | "we co-own this" |
+| **`weak_ptr`** | reference a `shared_ptr` object but must NOT own/keep it alive | "I observe, don't own" |
+| **raw `T*` / `T&`** | just *use* it, guaranteed alive; **no ownership** | "I'm only borrowing" |
+
+### Key mental shifts
+1. **Default to `unique_ptr`.** Most owned objects have one owner; it's zero-overhead, no reason not to.
+2. **`shared_ptr` is a deliberate choice, not the default.** Heavier (2 pointers + atomic refcount); "shared everywhere" is a classic junior mistake. Ask: *does more than one thing genuinely need to keep this alive?*
+   > Clarifying "2 pointers + atomic refcount" — these are two separate costs:
+   > - **2 pointers** → the `shared_ptr` variable's **size** (16 bytes): it holds a pointer to the object **and** a pointer to the control block. (`unique_ptr` = 1 pointer, 8 bytes.)
+   > - **refcount** → the **strong + weak counts**, which live **in the control block** and are **atomic** → a **speed** cost (atomic bump on every copy/destroy).
+3. **Raw pointers are fine — for non-owning use.** Modern C++ banned raw pointers for *ownership*, not for borrowing:
+   ```cpp
+   void print(const Widget& w);   // borrows, doesn't own — reference ideal
+   void process(Widget* w);       // borrows, may be null — raw pointer
+   ```
+4. **Pass by reference, don't copy smart pointers needlessly.** Passing `shared_ptr` by value bumps the atomic count every call; if you only *use* the object, take `const T&` or `T*`.
+
+### Summary
+- Own alone? → `unique_ptr` (default). Own together? → `shared_ptr` (deliberate).
+- Reference a shared object without owning? → `weak_ptr`. Just borrowing, guaranteed alive? → raw `T*`/`T&`.
+- One question drives it all: **who owns this object?**
 
 ---
 
