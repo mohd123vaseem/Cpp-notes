@@ -5,10 +5,11 @@ using namespace std;
 class shared_ptr
 {
 
+private:
     int *ref_cnt;
+    int *ptr;
 
 public:
-    int *ptr;
 
     // normal constructor.
     shared_ptr(int *p)
@@ -28,8 +29,8 @@ public:
         cout << "COPY shared_ptr " << *(this->ptr) << " has ref count " << *(this->ref_cnt) << endl;
     }
 
-    // Assignment constructor
-    shared_ptr &operator=(const shared_ptr &other)
+    // Assignment constructor(operator overloading)
+    shared_ptr& operator=(const shared_ptr &other)
     {
 
         if (this == &other)
@@ -74,6 +75,20 @@ public:
         delete ref_cnt;
         ref_cnt = nullptr;
     }
+     
+    //deference operator overloading
+    int& operator*(){
+        return *this->ptr;
+    }
+
+    int* operator->(){
+         return ptr;
+    }
+
+    int get_count() const {
+
+        return *this->ref_cnt;
+    }
 };
 
 int main()
@@ -89,11 +104,12 @@ int main()
     shared_ptr p4 = shared_ptr(temp_ptr2);
     p4 = p1;//assigning the ptr p1 to p4.
 
-    cout << "value of pointer is " << *(p1.ptr) << " ,Address of value is " << (p1.ptr)<< endl;
-    cout << "value of pointer is " << *(p2.ptr) << " ,Address of value is " << (p2.ptr) << endl;
+    cout << "value of pointer is " << (*p1) <<" ,and cnt for this ptr is "<<p1.get_count()<<endl;
+
+    cout << "value of pointer is " << (*p2) <<endl;
     // cout << "value of pointer is " << *(p3.ptr) << " ,Address of value is " << (p3.ptr) << endl;
     cout << "\n";
-    cout << "value of pointer is " << *(p4.ptr) << " ,Address of value is " << (p4.ptr) << endl;
+    cout << "value of pointer is " << (*p4) <<endl;
     // cout << "value of pointer is " << *(p5.ptr) << " ,Address of value is " << (p5.ptr) << endl;
     cout << "\n";
     return 0;
