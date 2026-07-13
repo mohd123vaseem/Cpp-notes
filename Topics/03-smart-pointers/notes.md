@@ -17,7 +17,7 @@ Modern C++ almost never uses raw `new`/`delete`. Smart pointers express **owners
 | 3 | **`weak_ptr`** — breaking reference cycles | "What's a `shared_ptr` cycle and how does `weak_ptr` fix it?" | ✅ Done |
 | 4 | **`make_unique` / `make_shared`** — why preferred | "Why prefer `make_shared` over `new`?" | ✅ Done |
 | 5 | **When to use which** — the ownership decision | "unique vs shared vs weak — when each?" | ✅ Done |
-| 6 | ⭐ **Write a basic `shared_ptr` from scratch** | "Sketch a minimal `shared_ptr`." | ⬜ Pending |
+| 6 | ⭐ **Write a basic `shared_ptr` from scratch** | "Sketch a minimal `shared_ptr`." | ✅ Done (Rule of 3) — ⬜ move ctor/assign pending Topic 7 |
 
 > Sub-topic 6 is the deep one — the highest-yield piece where interviewers separate people who *use* smart pointers from people who *understand* them.
 
@@ -337,8 +337,56 @@ Do you OWN the object (responsible for deleting it)?
 
 ---
 
+## Sub-topic 6 — ⭐ Writing `shared_ptr` from scratch
+
+The classic whiteboard ask. Built incrementally in `shared_ptr_impl.cpp`. **Status: Rule of 3 complete; move semantics (Rule of 5) deferred until after Topic 7.**
+
+### The design (what a minimal `shared_ptr` needs)
+```
+shared_ptr object (stack)          heap
+┌──────────────────┐              ┌──────────┐
+│ T*   ptr ────────┼─────────────►│  object  │
+│ int* ref_cnt ────┼───┐          └──────────┘
+└──────────────────┘   │          ┌──────────┐
+                       └─────────►│ count=N  │   ← the "control block"
+                                  └──────────┘
+```
+- **`T* ptr`** — the managed object.
+- **`int* ref_cnt`** — a **heap** count, so all copies share **one** count via the pointer. (Stays `int` even when templated — the count is bookkeeping, not the managed type.)
+
+### The members (Rule of 3)
+| Member | Job |
+|--------|-----|
+| **Raw-pointer ctor** `shared_ptr(T* p)` | take ownership; **create a new count = 1** |
+| **Copy ctor** `shared_ptr(const shared_ptr&)` | share `ptr` + `ref_cnt`; **`++(*ref_cnt)`** |
+| **Copy assignment** `shared_ptr& operator=(const shared_ptr&)` | 1) **self-check** → 2) **release old** (decrement; if it hits 0, delete object **and** count) → 3) **share new** (+increment) → 4) `return *this` |
+| **Destructor** | decrement; at 0, delete object **and** count |
+| **`operator*`** → `T&` | so `*p` gives the object (reference → `*p = x` works) |
+| **`operator->`** → `T*` | return the **raw pointer**; the compiler chains the arrow to reach members |
+| **`use_count() const`** | expose the count as a **read-only value** (never the pointer) |
+
+### Key lessons learned building it
+1. **The count must live on the heap** and be shared via a pointer. A plain `int` member gives each wrapper its own copy (no sharing); a `static` member gives *all* objects **one** count (wrong granularity); a global map is external state. → **per-object-group heap count.**
+2. **Sharing happens by COPYING a wrapper — not by constructing several wrappers from the same raw pointer.** Doing the latter creates independent counts → **double free**.
+3. **Default member initializers (`int* x = new int(0);`) run for *every* constructor** — including the copy ctor, where the allocation is immediately overwritten → silent **leak**. Initialize the count in the raw-pointer ctor only.
+4. **Pointer vs pointee:** `ref_cnt = new int(1)` (assign the pointer) — **not** `*ref_cnt = *new int(1)` (derefs an invalid pointer = UB + leak).
+5. **Copy assignment is the tricky one:** must **release what it already owns** before taking the new object, and **guard self-assignment first** (otherwise `a = a` deletes the very object it's about to copy).
+   - Canonical self-check: `if (this == &other)` — compares the **wrapper objects'** addresses.
+   - (`this->ptr == other.ptr` compares the **managed heap object's** address — also safe here, and additionally short-circuits "already sharing the same object".)
+6. **Encapsulation:** `ptr`/`ref_cnt` are **private**; expose `use_count()` returning a **copy** of the number. Users may *read* the count, never *modify* it.
+7. **Mark read-only methods `const`** (`use_count() const`) — else a `const shared_ptr&` can't call them.
+8. **Templates instantiate lazily** — a member function is only compiled when actually called. Debug `cout << *ptr` in the copy ctor compiles fine until you *copy* a `shared_ptr<Person>`, then it explodes ("no `operator<<`"). A generic class must not assume anything about `T`.
+9. The raw-pointer ctor should be **`explicit`** — implicit conversion from a raw pointer to an owning smart pointer is dangerous.
+
+### ⬜ Still to add (after Topic 7 — Move Semantics)
+- **Move constructor** + **move assignment** (completes the **Rule of 5**): steal the source's `ptr`/`ref_cnt` and null it out — no refcount bump needed, since the source is dying anyway.
+- *(Optional polish: `get()`, `reset()`, atomic refcount for thread-safety, `weak_ptr` support.)*
+
+---
+
 ## Code examples in this folder
 
 | File | Demonstrates |
 |------|--------------|
 | `threads_shared_ptr.cpp` | Safe pattern (each thread its own copy, atomic refcount) vs data race (threads sharing one instance) |
+| `shared_ptr_impl.cpp` | **Hand-written `shared_ptr`** (built from scratch): templated, heap refcount, Rule of 3, `operator*`/`->`, `use_count()` |
