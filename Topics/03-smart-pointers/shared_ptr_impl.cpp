@@ -30,6 +30,27 @@ public:
         cout << "COPY shared_ptr " << *(this->ptr) << " has ref count " << *(this->ref_cnt) << endl;
     }
 
+    // destructor
+    ~shared_ptr()
+    {
+        if (*ref_cnt != 1)
+        {
+            // cout << "shared_ptr " << *ptr << " has ref count " << *ref_cnt << " ,so NO DELETE" << endl;
+            *ref_cnt -= 1;
+            return;
+        }
+        cout << "\n";
+        // cout << "shared_ptr " << *ptr << " has ref count " << *ref_cnt << " ,so we DELETE NOW" << endl;
+        delete ptr; // after this heap memo is freed that was occupied by 10.
+        // now pointer is dangling ,as it points to add that has no vlaue.
+        ptr = nullptr; // now its safe as it does not point to freed memo.
+        cout << "ptr is freed along with heap memo" << endl;
+        cout << "pointer points to null" << ptr << endl;
+        // did same for refcount.
+        delete ref_cnt;
+        ref_cnt = nullptr;
+    }
+
     // Assignment constructor(operator overloading)
     shared_ptr &operator=(const shared_ptr &other)
     {
@@ -57,26 +78,6 @@ public:
         return *this;
     }
 
-    ~shared_ptr()
-    {
-        if (*ref_cnt != 1)
-        {
-            // cout << "shared_ptr " << *ptr << " has ref count " << *ref_cnt << " ,so NO DELETE" << endl;
-            *ref_cnt -= 1;
-            return;
-        }
-        cout << "\n";
-        // cout << "shared_ptr " << *ptr << " has ref count " << *ref_cnt << " ,so we DELETE NOW" << endl;
-        delete ptr; // after this heap memo is freed that was occupied by 10.
-        // now pointer is dangling ,as it points to add that has no vlaue.
-        ptr = nullptr; // now its safe as it does not point to freed memo.
-        cout << "ptr is freed along with heap memo" << endl;
-        cout << "pointer points to null" << ptr << endl;
-        // did same for refcount.
-        delete ref_cnt;
-        ref_cnt = nullptr;
-    }
-
     // deference operator overloading
     T &operator*()
     {
@@ -100,9 +101,10 @@ struct Person
     string name;
     int age;
 
-    Person(string name,int age){
-        this->name=name;
-        this->age=age;
+    Person(string name, int age)
+    {
+        this->name = name;
+        this->age = age;
     }
 };
 
@@ -110,10 +112,10 @@ int main()
 {
 
     cout << "hello world" << endl;
-    
-    shared_ptr<Person> p = new Person("vaseem",23);
 
-    cout<<"name is "<<p->name<<" ,age is "<<p->age<<endl;
+    shared_ptr<Person> p = new Person("vaseem", 23);
+
+    cout << "name is " << p->name << " ,age is " << p->age << endl;
 
     int *temp_ptr1 = new int(10);
     int *temp_ptr2 = new int(123);
