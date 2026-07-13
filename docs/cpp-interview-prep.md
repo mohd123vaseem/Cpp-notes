@@ -38,7 +38,10 @@ For every topic, your daily note should answer four things:
 ## TIER 1 — Non-negotiable core
 *Asked everywhere, highest ROI.*
 
-### 1. ⭐ Memory: stack vs heap, RAII
+> **Time estimates** in each heading assume **~1 hr/day** of C++ study. They're a "first solid pass" target — add ~30% later for revision + self-test drilling.
+> **Tier 1 total: ~16 days** · Tier 2: ~16 days · Tier 3: ~12 days
+
+### 1. ⭐ Memory: stack vs heap, RAII (4 days) ✅ DONE
 - Stack vs heap (what lives where, lifetimes, cost)
 - `new`/`delete`, `new[]`/`delete[]`
 - **RAII** — the single most important C++ idiom (resource tied to object lifetime)
@@ -46,14 +49,14 @@ For every topic, your daily note should answer four things:
 - **[MERGED]** Object lifetime & **storage duration**: automatic, static, dynamic, thread-local
 - ⭐ Q: "What is RAII and why does C++ rely on it?" / "How do you prevent leaks without a garbage collector?"
 
-### 2. ⭐ Pointers, references, const correctness
+### 2. ⭐ Pointers, references, const correctness (3 days) ✅ DONE
 - Pointer vs reference (when each)
 - const pointer vs pointer-to-const (read const right-to-left)
 - `nullptr` vs `NULL` vs `0`
 - const member functions, const parameters/returns, `mutable`
 - ⭐ Q: "Difference between `const int*`, `int* const`, `const int* const`?"
 
-### 3. ⭐ Smart pointers
+### 3. ⭐ Smart pointers (5 days) ✅ DONE *(move ctor/assign pending Topic 7)*
 *One of the most-asked topics.*
 - `unique_ptr` (sole ownership, move-only)
 - `shared_ptr` (reference counting, the control block)
@@ -64,7 +67,7 @@ For every topic, your daily note should answer four things:
 - **[MERGED]** ⭐ **Write a basic `shared_ptr` from scratch** — a classic whiteboard ask
 - ⭐ Q: "unique vs shared vs weak ptr?" / "How does shared_ptr's refcount work?" / "What's a shared_ptr cycle and how does weak_ptr fix it?"
 
-### 4. ⭐ OOP + polymorphism + vtables
+### 4. ⭐ OOP + polymorphism + vtables (3 days)
 - Encapsulation, inheritance (public/private/protected)
 - Virtual functions, vtable/vptr (how dynamic dispatch works mechanically)
 - ⭐ Virtual destructors (why a base class needs one)
@@ -77,7 +80,7 @@ For every topic, your daily note should answer four things:
 - **[MERGED]** **pimpl idiom** (pointer-to-implementation) — hides implementation, cuts build dependencies; ties to compilation model (#15)
 - ⭐ Q: "How do virtual functions work under the hood?" / "Why does a polymorphic base class need a virtual destructor?" / "What is object slicing?"
 
-### 5. ⭐ Constructors/destructors + Rule of 0/3/5
+### 5. ⭐ Constructors/destructors + Rule of 0/3/5 (2 days) — *do this NEXT (you just built Rule of 3 by hand)*
 - Default, parameterized, copy, move constructors; destructor
 - Copy constructor vs copy assignment; move constructor vs move assignment
 - Deep vs shallow copy
@@ -86,7 +89,7 @@ For every topic, your daily note should answer four things:
 - `explicit` keyword
 - ⭐ Q: "Explain the Rule of Three/Five." / "When is the copy constructor called vs assignment?" / "Write a class that manages a raw pointer correctly."
 
-### 6. ⭐ [ADDED] The four casts
+### 6. ⭐ [ADDED] The four casts (2 days)
 *Asked constantly — surprised this wasn't already in. Pairs naturally with Tier 1.*
 - `static_cast` — compile-time, related types
 - `dynamic_cast` — runtime, polymorphic downcasts (needs RTTI, returns nullptr/throws)
@@ -100,8 +103,8 @@ For every topic, your daily note should answer four things:
 ## TIER 2 — Strong differentiators
 *Modern C++, STL internals, concurrency.*
 
-### 7. ⭐ Move semantics & rvalue references
-*Modern-C++ favorite.*
+### 7. ⭐ Move semantics & rvalue references (4 days)
+*Modern-C++ favorite. → then finish the hand-written `shared_ptr` (Rule of 5).*
 - lvalue vs rvalue
 - rvalue references (`&&`)
 - `std::move` (what it actually does — just a cast!)
@@ -110,7 +113,7 @@ For every topic, your daily note should answer four things:
 - (Lighter: `std::forward`, perfect forwarding)
 - ⭐ Q: "What does std::move actually do?" / "Why are move semantics faster?" / "What is copy elision?"
 
-### 8. ⭐ STL: containers, complexity, iterator invalidation
+### 8. ⭐ STL: containers, complexity, iterator invalidation (3 days)
 - `vector`, `deque`, `list`, `map`, `unordered_map`, `set`, `unordered_set`, `stack`, `queue`, `priority_queue`
 - Internal implementation + complexity (vector = dynamic array; map = red-black tree O(log n); unordered_map = hash table O(1) avg)
 - When to use which
@@ -119,7 +122,7 @@ For every topic, your daily note should answer four things:
 - **[ADDED]** Common algorithms: `sort`, `find`, `lower_bound`, `accumulate`, the remove-erase idiom
 - ⭐ Q: "map vs unordered_map — when and why?" / "When does a vector iterator get invalidated?" / "How is unordered_map implemented?"
 
-### 9. ⭐ Concurrency & multithreading
+### 9. ⭐ Concurrency & multithreading (2 days — your strength, should go fast)
 *Critical for your systems background.*
 - `std::thread`
 - `mutex`, `lock_guard`, `unique_lock`, `scoped_lock`
@@ -133,14 +136,14 @@ For every topic, your daily note should answer four things:
 - ⭐ Q: "Difference between mutex and atomic?" / "What causes a deadlock and how do you prevent it?" / "Make this class thread-safe."
 - 🔧 *Your material:* Redis project's `db_mutex` + the TSan hunt.
 
-### 10. Templates & generics
+### 10. Templates & generics (3 days)
 - Function templates, class templates
 - Template specialization (full + partial)
 - `auto`, `decltype`
 - (Template metaprogramming → Tier 4)
 - Q: "How do templates work / when are they instantiated?"
 
-### 11. Modern C++ (C++11/14/17) essentials
+### 11. Modern C++ (C++11/14/17) essentials (2 days)
 - Lambdas (captures by value/ref, closures, mutable lambdas)
 - `auto`, range-based for
 - Structured bindings
@@ -152,7 +155,7 @@ For every topic, your daily note should answer four things:
 
 ---
 
-### 11b. ⭐ [MERGED] Operator overloading
+### 11b. ⭐ [MERGED] Operator overloading (2 days)
 *Commonly appears; pairs naturally with the Rule of 5.*
 - Mechanics beyond copy/move assignment
 - Member vs non-member (free function) overloads
@@ -164,7 +167,7 @@ For every topic, your daily note should answer four things:
 
 ## TIER 3 — Senior / systems signals
 
-### 11c. ⭐ [MERGED] Systems fundamentals (OS layer)
+### 11c. ⭐ [MERGED] Systems fundamentals (OS layer) (2 days — your strength)
 *Tier 3 in general, but treat as **P1 for systems / FAANG** targets — plays directly to your background.*
 - Process vs thread; context switching; scheduling basics
 - **Virtual memory & paging** (where the "virtual address space" from stack-vs-heap really lives)
@@ -174,26 +177,26 @@ For every topic, your daily note should answer four things:
 - Futex underneath mutexes
 - ⭐ Q: "process vs thread?" / "what happens on a page fault?" / "how would you debug an OOM kill / a slow server?" / "what causes cache misses?"
 
-### 12. Undefined behavior
+### 12. Undefined behavior (1 day)
 - What UB is and why it's dangerous
 - Common sources: signed overflow, out-of-bounds, use-after-free, uninitialized reads, strict aliasing, dangling references
 - Q: "Give examples of undefined behavior." / "Why is UB worse than a crash?"
 - 🔧 *Your material:* the heisenbug story.
 
-### 13. Exception handling & safety
+### 13. Exception handling & safety (2 days)
 - `try`/`catch`/`throw`
 - Exception safety guarantees (no-throw / strong / basic)
 - RAII + exceptions (why destructors must not throw)
 - `noexcept`
 - Q: "What are the exception safety guarantees?" / "Why shouldn't destructors throw?"
 
-### 14. The memory model & atomics (deeper)
+### 14. The memory model & atomics (deeper) (3 days)
 - `memory_order` (relaxed, acquire, release, seq_cst)
 - happens-before relationship
 - False sharing, cache lines (for performance-sensitive roles)
 - Q: "Explain acquire/release semantics." / "What is false sharing?"
 
-### 15. Compilation, linking, ODR
+### 15. Compilation, linking, ODR (2 days)
 - Compilation stages (preprocess → compile → assemble → link)
 - Declaration vs definition, One Definition Rule
 - `static` vs `extern`, internal/external linkage
@@ -201,7 +204,7 @@ For every topic, your daily note should answer four things:
 - **[ADDED]** Static initialization order fiasco (and the Meyers singleton fix) — commonly asked, relevant to real codebases
 - Q: "What's the difference between declaration and definition?" / "What does `inline` really mean?"
 
-### 16. [ADDED] Memory layout & object model
+### 16. [ADDED] Memory layout & object model (2 days)
 *You're a systems person — this plays to your strength.*
 - Struct padding, alignment, `alignas`/`alignof`
 - "What's the `sizeof` this struct and why?" (reorder members to shrink it)
