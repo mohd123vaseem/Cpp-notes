@@ -7,7 +7,7 @@ class person{
     public:
     string *name;
 
-    person(string s){
+   explicit person(string s){
         name=new string(s);
     }
     

@@ -18,7 +18,7 @@ These are the **special member functions** — the ones the compiler will silent
 | 4 | ⭐ **Rule of 0 / 3 / 5** — when you must define them | "Explain the Rule of Three/Five." | ✅ Done |
 | 5 | **Member initializer lists** + construction/destruction order | "Why prefer the init list over assigning in the body?" | ✅ Done |
 | 6 | **`explicit`** keyword | "What does `explicit` prevent?" | ✅ Done |
-| 7 | ⭐ **Write a class that manages a raw pointer correctly** | (the practical test — you've basically done this) | ⬜ Pending |
+| 7 | ⭐ **Write a class that manages a raw pointer correctly** | (the practical test) | ✅ Done — `raw_ptr.cc` (deep copy) + `shared_ptr_impl.cpp` (shared/refcounted) |
 
 > Note: **move** ctor/assignment get introduced here but go deep in **Topic 7 (Move Semantics)** — that's also when we finish the `shared_ptr` Rule of 5.
 
@@ -527,6 +527,55 @@ You can still do it — but only **on purpose**, and it's obvious in the code.
 
 > **Ownership transfer should never be silent.** That's exactly why the real `std::shared_ptr` marks its raw-pointer constructor `explicit`.
 
+### Another angle: a single-arg ctor silently FABRICATES a whole object
+
+The conversion that matters isn't "what converts *to* `string`" — the argument is always a string. It's that a **bare `string` silently becomes a whole `person`**, i.e. your constructor runs and conjures a brand-new object you never asked for.
+
+```cpp
+#include <iostream>
+#include <string>
+using namespace std;
+
+class person {
+public:
+    string* name;
+    person(string s) { name = new string(s); }   // ⚠️ NOT explicit → implicit conversion
+    person(const person& other) { name = new string(*other.name); }
+    ~person() { delete name; }
+    person& operator=(const person& other) {
+        if (this == &other) return *this;
+        *name = *other.name;
+        return *this;
+    }
+};
+
+void addToTeam(person p) {                        // expects a PERSON
+    cout << "added: " << *p.name << '\n';
+}
+
+int main() {
+    string username = "vaseem";   // just a username string I have lying around
+    addToTeam(username);          // ⚠️ COMPILES — the compiler silently did:
+                                  //        addToTeam( person(username) )
+}
+```
+
+**What happens on `addToTeam(username)`:** the compiler runs `person(string s)`, creating a **brand-new temporary `person`** whose `name` is a **fresh heap string** copy of `"vaseem"`, and passes *that* to the function.
+
+```
+username (a string)          the NEW temporary person (fabricated!)
+ ┌──────────┐               ┌──────────────┐        ┌──────────┐
+ │ "vaseem" │──copied──────►│ name ────────┼───────►│ "vaseem" │  ← fresh heap string
+ └──────────┘               └──────────────┘        └──────────┘
+  (still yours)              (conjured by the implicit conversion — you never wrote person(...))
+```
+
+You now have **two** things: your original `username`, and a whole `person` object the compiler invented. If `addToTeam` was meant to *find an existing* person, it instead got a **newly invented** one — and the call site `addToTeam(username)` looks totally innocent.
+
+**The fix** — `explicit person(string s)` → `addToTeam(username)` no longer compiles; you must write `addToTeam(person(username))` if you truly want to create one.
+
+> The point of `explicit` isn't protecting the argument's type — it's stopping your **class from being silently fabricated** out of that argument. Ask: *"should a bare `string` auto-become a whole `person`?"* Usually no → `explicit`.
+
 ### Rule of thumb
 > **Mark single-argument constructors `explicit` by default.** Leave it off only when the conversion is genuinely natural and safe — e.g. `std::string s = "hello";` (from `const char*`) reads naturally and surprises nobody.
 
@@ -539,3 +588,4 @@ Anything surprising, lossy, or ownership-transferring → **`explicit`**.
 | File | Demonstrates |
 |------|--------------|
 | `explicit_demo.cpp` | Full runnable walkthrough: a non-`explicit` single-arg ctor silently transferring ownership → dangling pointer → double free, and the `explicit` fix |
+| `raw_ptr.cc` | **Rule of 3 with DEEP copy** — a `person` class managing a raw `string*`: ctor (new), copy ctor (deep copy), destructor (delete), copy assignment (self-check + copy contents) |
