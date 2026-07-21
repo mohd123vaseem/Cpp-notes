@@ -68,17 +68,26 @@ For every topic, your daily note should answer four things:
 - ⭐ Q: "unique vs shared vs weak ptr?" / "How does shared_ptr's refcount work?" / "What's a shared_ptr cycle and how does weak_ptr fix it?"
 
 ### 4. ⭐ OOP + polymorphism + vtables (3 days)
-- Encapsulation, inheritance (public/private/protected)
-- Virtual functions, vtable/vptr (how dynamic dispatch works mechanically)
-- ⭐ Virtual destructors (why a base class needs one)
-- Abstract classes, pure virtual functions
+*Ordered basics → high-ROI. SOLID + design patterns are deliberately NOT here — they're LLD-round material in Parallel Track B, a separate interview type.*
+
+**Part A — Fundamentals (clear the basics fast):**
+- **[ADDED]** The **4 pillars**, named: Encapsulation, Abstraction, Inheritance, Polymorphism
+- Classes, access specifiers, **[ADDED]** `static` members/methods, `this` pointer
+- Inheritance types (public/protected/private) + **[ADDED]** **composition vs inheritance** (is-a vs has-a, "prefer composition")
+
+**Part B — The high-ROI meat:**
+- **[ADDED]** ⭐ **Overloading vs Overriding vs Hiding** (one of the most-asked OOP questions)
+- ⭐ Virtual functions, **vtable/vptr** (how dynamic dispatch works mechanically)
+- ⭐ Virtual destructors (why a polymorphic base class needs one)
+- Abstract classes, pure virtual functions (interfaces)
 - Object slicing
-- Static vs dynamic binding
-- **[ADDED]** RTTI and `dynamic_cast` (ties into vtables — how does the runtime know the real type?)
+- Static vs dynamic binding (early vs late binding)
+- **[ADDED]** ⚠️ Gotcha: calling **virtual functions in constructors/destructors**
+- **[ADDED]** RTTI and `dynamic_cast` (how does the runtime know the real type?)
 - (Lighter: diamond problem, virtual inheritance)
 - `override` / `final`
 - **[MERGED]** **pimpl idiom** (pointer-to-implementation) — hides implementation, cuts build dependencies; ties to compilation model (#15)
-- ⭐ Q: "How do virtual functions work under the hood?" / "Why does a polymorphic base class need a virtual destructor?" / "What is object slicing?"
+- ⭐ Q: "What are the 4 pillars?" / "Overloading vs overriding?" / "How do virtual functions work under the hood?" / "Why does a polymorphic base class need a virtual destructor?" / "What is object slicing?" / "Composition vs inheritance — when each?"
 
 ### 5. ⭐ Constructors/destructors + Rule of 0/3/5 (2 days) — *do this NEXT (you just built Rule of 3 by hand)*
 - Default, parameterized, copy, move constructors; destructor
