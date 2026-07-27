@@ -22,8 +22,8 @@ Polymorphism internals (how virtual dispatch actually works at the binary level)
 ### Part B — The high-ROI meat
 | # | Sub-topic | The classic question | Status |
 |---|-----------|----------------------|--------|
-| 4 | ⭐ **Overloading vs Overriding vs Hiding** | "Difference between overloading and overriding?" | ⬜ Pending |
-| 5 | ⭐ **Virtual functions + vtable/vptr** (dynamic dispatch mechanics) | "How do virtual functions work under the hood?" | ⬜ Pending |
+| 4 | ⭐ **Overloading vs Overriding vs Hiding** | "Difference between overloading and overriding?" | ✅ Done |
+| 5 | ⭐ **Virtual functions + vtable/vptr** (dynamic dispatch mechanics) | "How do virtual functions work under the hood?" | ✅ Done |
 | 6 | ⭐ **Virtual destructors** | "Why does a polymorphic base need a virtual destructor?" | ⬜ Pending |
 | 7 | **Abstract classes & pure virtual** (interfaces) | "What is an abstract class / pure virtual?" | ⬜ Pending |
 | 8 | **Object slicing** | "What is object slicing?" | ⬜ Pending |
@@ -247,8 +247,211 @@ class Server { Logger logger; public: void handle(){ logger.log("request"); } };
 
 ---
 
+## Sub-topic 4 — Overloading vs Overriding vs Hiding ⭐
+
+Three similar words, very different meanings. Interviewers probe the overriding-vs-hiding difference because it's subtle and causes real bugs.
+
+### 1. Overloading — same name, DIFFERENT params, same scope
+Multiple functions, same name, different parameter lists, in the same class. Compiler picks by arguments.
+```cpp
+class Printer {
+public:
+    void print(int i);
+    void print(double d);
+    void print(string s);
+};
+```
+- Resolved at **compile time** (static / early binding) → **compile-time polymorphism**.
+- ⚠️ **Return type alone does NOT count** — can't overload on return type only.
+- **No inheritance needed** — within one class.
+
+### 2. Overriding — derived redefines a `virtual` base function, SAME signature
+```cpp
+class Animal { public: virtual void speak() { cout << "..."; } };
+class Dog : public Animal { public: void speak() override { cout << "Woof"; } };
+
+Animal* a = new Dog();
+a->speak();   // "Woof" — DERIVED version runs, chosen at RUNTIME
+```
+- Requires **inheritance** + base function **`virtual`** + **identical signature**.
+- Resolved at **runtime** (dynamic / late binding) via the vtable (sub-topic 5) → **runtime polymorphism**.
+- Use `override` to have the compiler verify you actually overrode something.
+
+### 3. Hiding (name hiding / shadowing) — the sneaky one ⚠️
+If a derived class declares a function with the **same name** as a base function, it **hides ALL base functions of that name** (regardless of signature) — unless it's a proper override.
+```cpp
+class Base {
+public:
+    void foo(int x);
+    void foo(double d);
+};
+class Derived : public Base {
+public:
+    void foo(string s);   // hides BOTH base foos!
+};
+
+Derived d;
+d.foo("hi");   // ✅ Derived::foo(string)
+d.foo(42);     // ❌ COMPILE ERROR — Base::foo(int) is HIDDEN, not overloaded
+```
+The moment `Derived` declares *any* `foo`, all inherited `foo`s become invisible — the compiler stops looking in `Base` once it finds the name in `Derived`. This has **nothing to do with `virtual`** — it's pure name lookup, and almost always a mistake.
+
+**Fix** — un-hide with `using`:
+```cpp
+class Derived : public Base {
+public:
+    using Base::foo;      // bring Base's foos back into scope
+    void foo(string s);
+};
+d.foo(42);   // ✅ now finds Base::foo(int)
+```
+
+### ⭐ The critical distinction: Overriding vs Hiding
+| | Overriding | Hiding |
+|---|---|---|
+| Base function `virtual`? | **Yes** | No (or signature differs) |
+| Signature | **identical** to base | **different** from base |
+| What happens | derived replaces base **in the vtable** → runtime dispatch | derived name **shadows** the base name → base version invisible |
+| Through a **base pointer** | derived version runs ✅ | **base version runs** (no dispatch) ⚠️ |
+```cpp
+Base* b = new Derived();
+b->someFunc();
+// OVERRIDDEN (virtual, same sig) → Derived's version runs
+// HIDDEN (non-virtual or diff sig) → BASE's version runs — surprise!
+```
+
+#### Why the "surprise" — the pointer's type vs the actual object
+Calling through a **base pointer that points to a derived object** (`Base* b = new Derived();`):
+
+**Case A — `virtual` → Derived runs ✅**
+```cpp
+class Base    { public: virtual void someFunc() { cout << "Base"; } };
+class Derived : public Base { public: void someFunc() override { cout << "Derived"; } };
+Base* b = new Derived();
+b->someFunc();   // "Derived" — virtual → C++ checks the ACTUAL OBJECT at runtime
+```
+**Case B — NOT `virtual` → Base runs ⚠️ (the surprise)**
+```cpp
+class Base    { public: void someFunc() { cout << "Base"; } };      // no virtual
+class Derived : public Base { public: void someFunc() { cout << "Derived"; } };
+Base* b = new Derived();
+b->someFunc();   // "Base"!  even though b really points to a Derived
+```
+Without `virtual`, C++ decides **at compile time based on the POINTER'S TYPE** (`Base*`), not the actual object → calls `Base::someFunc`. The derived version is hidden, never consulted.
+> - **virtual** → decision based on the **actual object** (runtime) → Derived runs.
+> - **not virtual** → decision based on the **pointer/reference type** (compile time) → Base runs.
+>
+> That one word `virtual` is the entire difference (mechanically explained in sub-topic 5).
+
+#### What if you change the RETURN TYPE? (differs for all three)
+| Mechanism | Change only the return type → |
+|-----------|-------------------------------|
+| **Overloading** | ❌ **illegal** — can't overload on return type alone; params must differ. Compiler picks by call-site *arguments*, so it can't tell which return you meant. |
+| **Overriding** | ❌ **error** — signature (incl. return) must match… **except covariant returns** ✅ |
+| **Hiding** | ✅ **still hides** — hiding is by *name only*, return type is irrelevant |
+
+```cpp
+// Overloading — differ only by return type:
+int foo(int x);  double foo(int x);        // ❌ error
+
+// Overriding — return type must match:
+class Base    { public: virtual int  speak(); };
+class Derived : public Base { public: double speak(); };   // ❌ not an override
+
+// EXCEPTION — covariant return (pointer/ref to a more-derived type in the SAME hierarchy):
+class Base    { public: virtual Base*    clone(); };
+class Derived : public Base { public: Derived* clone() override; };  // ✅ legal
+//   Derived* IS-A Base* → safe & allowed (common in clone() patterns)
+
+// Hiding — return type doesn't matter, name still shadows:
+class Base    { public: void foo(int); };
+class Derived : public Base { public: double foo(int); };  // still HIDES Base::foo
+```
+
+### Summary
+| Term | Same name? | Params | `virtual`? | Inheritance? | Resolved |
+|------|-----------|--------|-----------|--------------|----------|
+| **Overloading** | yes | **different** | no | no (same class) | compile time |
+| **Overriding** | yes | **same** | **yes** | yes | **run time** |
+| **Hiding** | yes | any | no | yes | compile time (name lookup) |
+
+- **Overloading** — same name, *different params*, same class → compile-time choice.
+- **Overriding** — same name, *same params*, `virtual`, derived class → runtime dispatch.
+- **Hiding** — derived declares the same *name*, silently shadowing the base's versions → usually a bug.
+
+---
+
+## Sub-topic 5 — Virtual Functions + vtable/vptr ⭐
+
+*"How do virtual functions work under the hood?"* — explains mechanically why `virtual` makes the derived version run through a base pointer.
+
+### The problem
+```cpp
+Shape* s = getSomeShape();   // could be Circle, Square, Triangle...
+s->area();                   // must call the CORRECT area() for whatever it really is
+```
+At compile time the compiler only knows `s` is a `Shape*` — the actual type is decided at runtime. The vtable mechanism bridges that gap.
+
+### The two pieces
+
+**vtable (virtual table):** for **each class with virtual functions**, the compiler builds **one** hidden static table — an array of **function pointers**, one slot per virtual function, pointing to that class's version.
+```cpp
+class Animal { public: virtual void speak(){cout<<"...";} virtual void move(){cout<<"moves";} };
+class Dog : public Animal { public: void speak() override {cout<<"Woof";} };  // move() not overridden
+```
+```
+Animal's vtable:               Dog's vtable:
+ speak → Animal::speak          speak → Dog::speak    ← overridden (slot swapped)
+ move  → Animal::move           move  → Animal::move  ← inherited (not overridden)
+```
+**Overriding = swapping a function pointer in the vtable.**
+
+**vptr (virtual pointer):** every **object** of such a class gets one hidden member — a pointer to its class's vtable, set at **construction** based on the object's **actual type**.
+```
+  Animal object a          Dog object d
+  [ vptr ]──►Animal        [ vptr ]──►Dog's
+  [ data ]   vtable        [ data ]   vtable
+```
+
+### How a virtual call works
+```cpp
+Animal* a = new Dog();
+a->speak();
+```
+The compiler generates (roughly):
+```
+1. dereference a          → reach the OBJECT it points to  (a Dog object)
+2. read THAT OBJECT's vptr → the vtable                     (Dog's vtable)
+3. look up speak's slot    → function ptr                   (→ Dog::speak)
+4. call through it                                          → runs Dog::speak ✅
+```
+This is **dynamic dispatch / late binding** — decided at **runtime**.
+
+> ⚠️ **Precision:** a **pointer has no vptr** — the **object** does. "Follow a's vptr" is loose shorthand for *"follow `a` to the object, then read **that object's** vptr."* The pointer only gets you to the object; the object's vptr (set at construction to its real type) is what decides. It works because the object is a `Dog`, so its vptr → Dog's vtable → the lookup finds `Dog::speak`. The pointer's static type (`Animal*`) is irrelevant.
+
+### Why non-virtual differs (the sub-topic-4 "surprise")
+A non-virtual call has **no vtable lookup** — the compiler hard-codes a direct call by the **pointer's static type** at compile time:
+```cpp
+a->someNonVirtual();   // "a is Animal* → call Animal::someNonVirtual" — object type ignored
+```
+> **`virtual` = "go through the vtable" (runtime, actual object). non-virtual = "call directly by pointer type" (compile time).**
+
+### Cost of virtual functions
+- **Memory:** +1 pointer per object (the vptr, 8 bytes on 64-bit) + one vtable per class (small, shared).
+- **Speed:** each call is **indirect** (follow vptr → look up → call) — an extra memory access, and **can't be inlined** (compiler doesn't know at compile time which function runs).
+- Negligible usually; matters in hot loops. **You pay only when you use `virtual`** (unlike Java where all methods are virtual by default).
+
+### Summary
+- **vtable** — one per class; array of pointers to its virtual-function versions. Overriding swaps a slot.
+- **vptr** — one hidden pointer per object → its class's vtable; set at construction by **actual** type.
+- **Virtual call** = follow vptr → look up slot → call → **runtime** dispatch.
+- Works because the vptr reflects the **object's real type**, not the pointer's static type.
+- **Cost:** +1 pointer/object, +indirect non-inlinable call.
+
+---
+
 ## Code examples in this folder
 
 | File | Demonstrates |
 |------|--------------|
-| _(added as we go)_ | |
+| `vtable_demo.cpp` | `sizeof` proof of the hidden vptr; dynamic dispatch (derived runs via base ptr); the non-virtual "surprise" (base runs) |
