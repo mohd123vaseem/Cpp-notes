@@ -24,7 +24,7 @@ Polymorphism internals (how virtual dispatch actually works at the binary level)
 |---|-----------|----------------------|--------|
 | 4 | ⭐ **Overloading vs Overriding vs Hiding** | "Difference between overloading and overriding?" | ✅ Done |
 | 5 | ⭐ **Virtual functions + vtable/vptr** (dynamic dispatch mechanics) | "How do virtual functions work under the hood?" | ✅ Done |
-| 6 | ⭐ **Virtual destructors** | "Why does a polymorphic base need a virtual destructor?" | ⬜ Pending |
+| 6 | ⭐ **Virtual destructors** | "Why does a polymorphic base need a virtual destructor?" | ✅ Done |
 | 7 | **Abstract classes & pure virtual** (interfaces) | "What is an abstract class / pure virtual?" | ⬜ Pending |
 | 8 | **Object slicing** | "What is object slicing?" | ⬜ Pending |
 | 9 | **Static vs dynamic binding** (early vs late) | "Early vs late binding?" | ⬜ Pending |
@@ -447,6 +447,70 @@ a->someNonVirtual();   // "a is Animal* → call Animal::someNonVirtual" — obj
 - **Virtual call** = follow vptr → look up slot → call → **runtime** dispatch.
 - Works because the vptr reflects the **object's real type**, not the pointer's static type.
 - **Cost:** +1 pointer/object, +indirect non-inlinable call.
+
+---
+
+## Sub-topic 6 — Virtual Destructors
+
+*"Why does a polymorphic base class need a virtual destructor?"* — builds directly on the vtable dispatch rule.
+
+### The problem: deleting through a base pointer
+```cpp
+class Base {
+public: ~Base() { cout << "~Base\n"; }              // NON-virtual destructor
+};
+class Derived : public Base {
+    int* data;
+public:
+    Derived()  { data = new int[100]; }
+    ~Derived() { delete[] data; cout << "~Derived\n"; }
+};
+
+Base* b = new Derived();   // base pointer, derived object
+delete b;                  // prints only "~Base"
+```
+**`~Derived` never runs!** `delete[] data` is skipped → the 100 ints **leak**.
+
+### Why — the same dispatch rule as sub-topic 5
+`delete b` must call *a* destructor. With a **non-virtual** destructor the compiler decides by the **pointer's static type** (`Base*`) → calls `~Base` only. The object is really a `Derived`, but the pointer type wins — the exact "surprise." The derived part is never destroyed → leak. (Technically this is **undefined behavior**.)
+
+### The fix: `virtual ~Base()`
+```cpp
+class Base { public: virtual ~Base() { cout << "~Base\n"; } };
+```
+Now `delete b` goes **through the vtable**: follows the object's vptr → finds `~Derived` → runs it **first**, then chains up to `~Base`:
+```
+~Derived
+~Base
+```
+Both run, in reverse-of-construction order (derived → base, Topic 1). No leak. ✅
+
+> 📖 **What is a "polymorphic class"?** A class with **at least one virtual function** (its own or inherited) — which is exactly what gives it a **vtable + vptr** and enables **runtime dispatch**. No virtual function → not polymorphic → no vtable, no dynamic dispatch, no `dynamic_cast`.
+> ```cpp
+> class A { void foo(); };            // ❌ not polymorphic (no virtual)
+> class B { virtual void speak(); };  // ✅ polymorphic
+> class C : public B { };             // ✅ polymorphic (inherits a virtual)
+> ```
+> Note: this means **runtime** polymorphism. Overloading/templates are *compile-time* polymorphism and don't make a class "polymorphic" in this technical sense.
+
+### The rule
+> **A class deleted through a base pointer (used polymorphically) MUST have a `virtual` destructor.**
+>
+> Heuristic: **if a class has ANY virtual function, give it a virtual destructor.**
+
+Conversely, a class **not** meant as a polymorphic base (no virtuals) should **not** have a virtual destructor — you'd pay the vptr cost for nothing.
+
+### Cost
+Making the destructor virtual gives the class a **vtable + vptr** (if it didn't have one) → every object grows by one pointer. So it's "virtual **when polymorphic**," not "always." A plain value type (e.g. `Point`) shouldn't have one.
+
+### Connect it back
+The destructor is just another slot in the vtable. Non-virtual → pointer-type dispatch → wrong (base only). Virtual → object-vptr dispatch → correct (derived, then base). Virtual destructors = "apply dynamic dispatch to cleanup so the *whole* object is destroyed."
+
+### Summary
+- Non-virtual destructor + delete via base pointer → only `~Base` runs → derived part **leaks** (UB).
+- Fix: `virtual ~Base()` → vtable dispatch → `~Derived` then `~Base`.
+- Rule: polymorphic base **must** have a virtual destructor; any class with a virtual function should too.
+- Cost: adds vptr/vtable → only for polymorphic classes.
 
 ---
 
