@@ -25,7 +25,7 @@ Polymorphism internals (how virtual dispatch actually works at the binary level)
 | 4 | ⭐ **Overloading vs Overriding vs Hiding** | "Difference between overloading and overriding?" | ✅ Done |
 | 5 | ⭐ **Virtual functions + vtable/vptr** (dynamic dispatch mechanics) | "How do virtual functions work under the hood?" | ✅ Done |
 | 6 | ⭐ **Virtual destructors** | "Why does a polymorphic base need a virtual destructor?" | ✅ Done |
-| 7 | **Abstract classes & pure virtual** (interfaces) | "What is an abstract class / pure virtual?" | ⬜ Pending |
+| 7 | **Abstract classes & pure virtual** (interfaces) | "What is an abstract class / pure virtual?" | ✅ Done |
 | 8 | **Object slicing** | "What is object slicing?" | ⬜ Pending |
 | 9 | **Static vs dynamic binding** (early vs late) | "Early vs late binding?" | ⬜ Pending |
 | 10 | ⚠️ **Virtual calls in ctor/dtor** (the gotcha) | "What happens if you call a virtual in a constructor?" | ⬜ Pending |
@@ -511,6 +511,68 @@ The destructor is just another slot in the vtable. Non-virtual → pointer-type 
 - Fix: `virtual ~Base()` → vtable dispatch → `~Derived` then `~Base`.
 - Rule: polymorphic base **must** have a virtual destructor; any class with a virtual function should too.
 - Cost: adds vptr/vtable → only for polymorphic classes.
+
+---
+
+## Sub-topic 7 — Abstract Classes & Pure Virtual Functions
+
+How C++ expresses an **interface** — the concrete mechanism behind the Abstraction pillar.
+
+### Pure virtual function — "you MUST override this"
+A **pure virtual** has no implementation in the base, marked `= 0`, and **must** be overridden:
+```cpp
+class Shape {
+public:
+    virtual double area() = 0;   // pure virtual — no body, MUST be overridden
+};
+```
+It says: *"every Shape has an `area()`, but Shape itself can't compute one — each concrete shape must."*
+
+### Abstract class — "cannot be instantiated"
+A class with **≥1 pure virtual function** is **abstract** → you cannot create an object of it:
+```cpp
+Shape s;    // ❌ error — abstract, can't instantiate (it's incomplete)
+Shape* p;   // ✅ pointer/reference to Shape is fine
+```
+
+### Concrete class — override everything, then instantiable
+A derived class becomes **concrete** only once it overrides **all** pure virtuals:
+```cpp
+class Circle : public Shape {
+    double r;
+public:
+    Circle(double radius) : r(radius) {}
+    double area() override { return 3.14159 * r * r; }
+};
+Circle c(5);   // ✅ concrete now
+```
+If it hadn't overridden `area()`, it would stay abstract.
+
+### The interface pattern
+```cpp
+class Shape {
+public:
+    virtual double area() = 0;
+    virtual void   draw() = 0;
+    virtual ~Shape() = default;      // ✅ virtual destructor — it's polymorphic
+};
+class Circle : public Shape { /* overrides area(), draw() */ };
+class Square : public Shape { /* overrides area(), draw() */ };
+
+void render(Shape* s) { s->draw(); cout << s->area(); }   // works for ANY shape
+```
+`Shape` is the **interface/contract**; `render()` works with any concrete shape without knowing its type. Add a `Triangle` later → `render()` unchanged. **Program to the interface, not the implementation.**
+
+### Notes
+- **C++ has no `interface` keyword** — an abstract class with *only* pure virtuals (no data, no implemented methods) *is* an interface.
+- Give abstract bases a **virtual destructor** (they're polymorphic, deleted through base pointers).
+- **Nuance:** a pure virtual *can* still have a body (`void Base::foo() {…}`) — a callable default — but the class stays abstract and it must still be overridden. Rare; signals depth.
+
+### Summary
+- **Pure virtual** = `virtual T f() = 0;` → derived **must** override.
+- **Abstract class** = has ≥1 pure virtual → **can't be instantiated**.
+- Becomes **concrete** when all pure virtuals are overridden.
+- C++ interfaces = abstract class of pure virtuals; give them a virtual destructor.
 
 ---
 
