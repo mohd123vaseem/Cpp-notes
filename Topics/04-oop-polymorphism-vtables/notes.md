@@ -26,9 +26,9 @@ Polymorphism internals (how virtual dispatch actually works at the binary level)
 | 5 | ⭐ **Virtual functions + vtable/vptr** (dynamic dispatch mechanics) | "How do virtual functions work under the hood?" | ✅ Done |
 | 6 | ⭐ **Virtual destructors** | "Why does a polymorphic base need a virtual destructor?" | ✅ Done |
 | 7 | **Abstract classes & pure virtual** (interfaces) | "What is an abstract class / pure virtual?" | ✅ Done |
-| 8 | **Object slicing** | "What is object slicing?" | ⬜ Pending |
-| 9 | **Static vs dynamic binding** (early vs late) | "Early vs late binding?" | ⬜ Pending |
-| 10 | ⚠️ **Virtual calls in ctor/dtor** (the gotcha) | "What happens if you call a virtual in a constructor?" | ⬜ Pending |
+| 8 | **Object slicing** | "What is object slicing?" | ✅ Done |
+| 9 | **Static vs dynamic binding** (early vs late) | "Early vs late binding?" | ✅ Done |
+| 10 | ⚠️ **Virtual calls in ctor/dtor** (the gotcha) | "What happens if you call a virtual in a constructor?" | ✅ Done |
 | 11 | **RTTI & `dynamic_cast`** | "How does the runtime know the real type?" | ⬜ Pending |
 | 12 | **Diamond problem & virtual inheritance** (lighter) | "What's the diamond problem?" | ⬜ Pending |
 | 13 | **`override` / `final`** | "What does `override` protect against?" | ⬜ Pending |
@@ -576,8 +576,189 @@ void render(Shape* s) { s->draw(); cout << s->area(); }   // works for ANY shape
 
 ---
 
+## Sub-topic 8 — Object Slicing
+
+The bug when you use polymorphic types **by value** instead of by pointer/reference — it silently destroys polymorphism.
+
+### What slicing is
+Copying a **derived object into a base object by value** → only the **base part** is copied; the derived-specific parts are **sliced off** and lost.
+```cpp
+class Animal { public: virtual void speak(){cout<<"Animal\n";} };
+class Dog : public Animal {
+    int tailLength;
+public: void speak() override { cout<<"Woof\n"; }
+};
+
+Dog d;
+Animal a = d;    // ⚠️ SLICING — only the Animal part of d is copied
+a.speak();       // "Animal" — NOT "Woof"!
+```
+`a` is an actual `Animal` object — only the base sub-part came across; `tailLength` and the Dog-ness are gone.
+
+### Why it happens — fixed size + base's vptr
+A `Animal` variable is exactly `sizeof(Animal)`; a `Dog` is bigger. Pour a `Dog` into a `Animal`-sized box → the extra part doesn't fit → discarded.
+```
+   Dog d                       Animal a  (fixed Animal-sized box)
+ │ Animal part │──copied──────►│ Animal part │   ← only this fits
+ │ tailLength  │──SLICED─X                       (discarded)
+```
+Also: the copy gets **`Animal`'s vptr**, not `Dog`'s → `a` is genuinely an `Animal` → `a.speak()` calls `Animal::speak`. **Value semantics defeat virtual dispatch** — polymorphism *requires* pointers/references.
+
+### The sneaky causes
+```cpp
+void process(Animal a) { a.speak(); }   // ⚠️ base BY VALUE
+process(Dog{});                          // sliced at the boundary → "Animal"
+
+std::vector<Animal> zoo;
+zoo.push_back(Dog{});                    // ⚠️ sliced — vector stores Animal objects
+```
+→ pass polymorphic types by `const Base&`/`Base*`, and store `vector<Base*>` or `vector<unique_ptr<Base>>`.
+
+### The fix: pointers or references (no copy → no slicing)
+```cpp
+Dog d;
+Animal& ref = d;   ref.speak();   // "Woof" ✅
+Animal* ptr = &d;  ptr->speak();  // "Woof" ✅
+void process(const Animal& a);    // by reference → full Dog, dispatch intact
+```
+
+> **Rule: use polymorphic types through pointers or references, never by value.** By value → slicing → derived part lost + dispatch broken.
+
+Bonus: an **abstract** base can't be sliced — `Animal a = d;` won't compile (can't instantiate the base). Another reason to favor pure-virtual interfaces.
+
+### Summary
+- **Slicing** = derived → base **by value** → derived part cut off; copy gets base's vptr → dispatch breaks.
+- **Sneaky:** pass-by-value, `vector<Base>`.
+- **Fix:** `Base*` / `const Base&` always. Abstract bases can't be sliced.
+
+---
+
+## Sub-topic 9 — Static vs Dynamic Binding
+
+Formalizes the recurring theme: **when does the compiler decide which function to call?** "Binding" = connecting a call `f()` to the actual function that runs.
+
+- **Static binding** (early binding) — decided at **compile time**.
+- **Dynamic binding** (late binding) — decided at **run time**.
+
+### Static binding — compile time (the default)
+Resolved by the **static type** (declared type / pointer type), hard-coded:
+```cpp
+greet(42);              // static — overload picked by argument type
+a.someNonVirtual();     // static — resolved by a's type
+Base* b = new Derived();
+b->nonVirtualFunc();    // static — resolved by POINTER type (Base*) → the "surprise"
+```
+Applies to: normal functions, **overloading**, **hiding**, **non-virtual** calls. Fast, inlinable; ignores the actual object type.
+
+### Dynamic binding — run time (virtual only)
+A **virtual** function called through a pointer/reference → resolved at runtime via the object's **vptr → vtable**:
+```cpp
+Animal* a = new Dog();
+a->speak();             // dynamic — follows the object's vptr → Dog::speak
+```
+Applies to: virtual functions via pointer/reference. Slower (indirect, non-inlinable); picks the correct override for the **actual object**.
+
+### The three conditions for dynamic binding (all required)
+1. Function is **`virtual`**, **and**
+2. Called through a **pointer or reference** (not a by-value object), **and**
+3. There's an override to dispatch to.
+
+Miss any one → falls back to static. Same `Dog d` in all three — only the **access** differs:
+```cpp
+Dog d;
+
+Animal  a = d;    // by VALUE → sliced, 'a' is a pure Animal (gets Animal's vptr)
+a.speak();        // "Animal" — STATIC (condition #2 fails: not ptr/ref)
+
+Animal& r = d;    // by REFERENCE → no copy, still a Dog underneath
+r.speak();        // "Woof"   — DYNAMIC ✅ (virtual + reference + override)
+
+Animal* p = &d;   // by POINTER → no copy, still a Dog underneath
+p->speak();       // "Woof"   — DYNAMIC ✅
+```
+**Why by-value is always static:** calling a virtual directly on a value object (`a.speak()`), the compiler *already knows* the exact type — a value object's type is fixed and can never secretly be a derived type. Nothing to decide at runtime → static. Only a **pointer/reference** can point to any derived object, so only those defer the decision to runtime.
+
+> This is *why* slicing kills polymorphism: slicing only happens **by value**, and a by-value object can never satisfy condition #2 → every virtual call on it is statically bound to the base. **Polymorphism requires pointers or references.**
+
+### Side-by-side
+| | Static (early) | Dynamic (late) |
+|---|---|---|
+| Decided | compile time | run time |
+| Based on | **static/declared type** | **actual object type** (via vptr) |
+| Applies to | normal, overloading, hiding, non-virtual | **virtual** via pointer/reference |
+| Mechanism | direct call, hard-coded | vptr → vtable → indirect call |
+| Speed | faster, inlinable | slower, not inlinable |
+
+### Everything in Topic 4 fits this one axis
+- **Overloading** → static (compile-time by args)
+- **Hiding** → static (compile-time name lookup)
+- **Non-virtual override** → static (pointer type wins — the "surprise")
+- **Virtual override** → dynamic (object's vptr wins — real polymorphism)
+- **Object slicing** → forces static (by-value breaks the pointer/reference condition)
+
+> **One-liner:** static = compiler picks by *declared type* at compile time (default); dynamic = runtime picks by *actual object type* via the vtable — only for a virtual function called through a pointer/reference.
+
+---
+
+## Sub-topic 10 — Virtual Calls in Constructors/Destructors ⚠️
+
+*"What happens if you call a virtual function from a constructor?"* — a classic gotcha.
+
+### The surprise
+Inside a constructor/destructor, a virtual call runs the **current class's** version — **not** the derived override.
+```cpp
+class Base {
+public:
+    Base() { init(); }                          // calls Base::init, NOT Derived::init!
+    virtual void init() { cout << "Base::init\n"; }
+};
+class Derived : public Base {
+public:
+    void init() override { cout << "Derived::init\n"; }
+};
+
+Derived d;   // prints "Base::init"  ← NOT "Derived::init"
+```
+
+### Why — construction order + the vptr
+1. **Construction order** (Topic 1): base is built **before** derived — `Base()` runs first.
+2. The **vptr** is set up **stage by stage** as each class's constructor runs.
+
+During `Base()`, the `Derived` part doesn't exist yet → the vptr still points to **Base's vtable** → `init()` resolves to `Base::init`.
+```
+Constructing a Derived:
+  1. Base()    runs → vptr → Base's vtable    → init() = Base::init
+  2. Derived() runs → vptr → Derived's vtable → NOW virtual calls hit Derived
+```
+
+### Why it's actually correct (not a bug)
+If `Base()` *could* call `Derived::init`, that override might touch derived members not yet initialized:
+```cpp
+class Derived : public Base {
+    int* data;
+public:
+    Derived() { data = new int[100]; }
+    void init() override { data[0] = 5; }   // data isn't set until Derived() runs!
+};
+```
+Calling `Derived::init` from `Base()` would use uninitialized `data` → garbage/crash. So C++ deliberately resolves the call to the current class.
+
+**Destructors, in reverse:** during `~Base()`, the `Derived` part is **already destroyed** (destruction order: derived → base), so a virtual call there also resolves to `Base`'s version — avoiding access to destroyed members.
+
+### Rule
+> **Don't call virtual functions from ctors/dtors expecting derived dispatch** — you get the current class's version. If you need derived behavior during setup, use **two-phase init** (construct, then call `init()` separately once fully built).
+
+### Summary
+- Virtual call in ctor/dtor → **current class's** version, not the derived override.
+- **Why:** vptr is built stage by stage; during `Base()` only the base exists → vptr → base's vtable.
+- **Intentional & safe:** avoids calling a derived override that touches not-yet-constructed / already-destroyed members.
+- **Rule:** no polymorphic dispatch in ctors/dtors; use two-phase init if needed.
+
+---
+
 ## Code examples in this folder
 
 | File | Demonstrates |
 |------|--------------|
 | `vtable_demo.cpp` | `sizeof` proof of the hidden vptr; dynamic dispatch (derived runs via base ptr); the non-virtual "surprise" (base runs) |
+| `slicing_demo.cpp` | Object slicing: by-value copy & pass-by-value lose the derived part (base runs); reference/pointer keep it (derived runs) |
