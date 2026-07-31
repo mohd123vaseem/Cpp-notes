@@ -29,10 +29,10 @@ Polymorphism internals (how virtual dispatch actually works at the binary level)
 | 8 | **Object slicing** | "What is object slicing?" | ✅ Done |
 | 9 | **Static vs dynamic binding** (early vs late) | "Early vs late binding?" | ✅ Done |
 | 10 | ⚠️ **Virtual calls in ctor/dtor** (the gotcha) | "What happens if you call a virtual in a constructor?" | ✅ Done |
-| 11 | **RTTI & `dynamic_cast`** | "How does the runtime know the real type?" | ⬜ Pending |
-| 12 | **Diamond problem & virtual inheritance** (lighter) | "What's the diamond problem?" | ⬜ Pending |
-| 13 | **`override` / `final`** | "What does `override` protect against?" | ⬜ Pending |
-| 14 | **pimpl idiom** | "What is pimpl and why use it?" | ⬜ Pending |
+| 11 | **RTTI & `dynamic_cast`** | "How does the runtime know the real type?" | ✅ Done |
+| 12 | **Diamond problem & virtual inheritance** (lighter) | "What's the diamond problem?" | ✅ Done |
+| 13 | **`override` / `final`** | "What does `override` protect against?" | ✅ Done |
+| 14 | **pimpl idiom** | "What is pimpl and why use it?" | ✅ Done |
 
 ---
 
@@ -756,9 +756,339 @@ Calling `Derived::init` from `Base()` would use uninitialized `data` → garbage
 
 ---
 
+## Sub-topic 11 — RTTI & `dynamic_cast`
+
+**RTTI = Run-Time Type Information** — ask, at runtime, "what is this object's **actual** type?" Powered by the vtable.
+
+### The problem
+```cpp
+class Animal { public: virtual ~Animal() = default; };
+class Dog : public Animal { public: void fetch(); };
+
+void handle(Animal* a) {
+    a->fetch();   // ❌ Animal has no fetch(). But IS it a Dog?
+}
+```
+You need "if this is really a Dog, give me a `Dog*`." → `dynamic_cast`.
+
+### `dynamic_cast` — the safe down-cast (base → derived)
+```cpp
+void handle(Animal* a) {
+    Dog* d = dynamic_cast<Dog*>(a);   // "is a really a Dog?"
+    if (d) d->fetch();                // succeeded → a IS a Dog
+    else   cout << "not a dog\n";     // failed
+}
+```
+| Cast target | On success | On **failure** |
+|---|---|---|
+| **Pointer** `dynamic_cast<Dog*>(a)` | valid `Dog*` | **`nullptr`** |
+| **Reference** `dynamic_cast<Dog&>(a)` | valid `Dog&` | **throws `std::bad_cast`** |
+
+Why differ? A pointer can be null (failure → nullptr); a reference **can't** be null (Topic 2) → must throw. Check pointer form with `if`, wrap reference form in `try/catch`.
+
+### Under the hood (ties to the vtable)
+Each class's **vtable** holds a pointer to a **`type_info`** describing its real type. `dynamic_cast` follows the object's vptr → vtable → type_info → checks if the actual type matches/derives from the target.
+
+**Consequence:** `dynamic_cast` works **only on polymorphic types** (≥1 virtual function → a vtable). No virtual → no vtable → won't compile. (Another reason interface bases have a virtual destructor.)
+
+### `typeid` — the other RTTI tool
+```cpp
+#include <typeinfo>
+Animal* a = new Dog();
+typeid(*a).name();              // "Dog" (mangled, compiler-specific)
+if (typeid(*a) == typeid(Dog)) { /* exact-type match */ }
+```
+⚠️ `typeid(*a)` (dereferenced) → **actual runtime type** (Dog); `typeid(a)` (the pointer) → **static type** (`Animal*`). And `typeid` checks **exact** type:
+- **`dynamic_cast`** — "is it this type **or derived from it**?" (is-a) → safe casting.
+- **`typeid`** — "is it **exactly** this type?" → exact comparison.
+
+### ⚠️ Design smell
+Heavy `dynamic_cast`/type-checking usually means you're re-implementing what **virtual functions do for free**:
+```cpp
+// ❌ RTTI-heavy:
+if (auto d = dynamic_cast<Dog*>(a)) d->makeSound();
+else if (auto c = dynamic_cast<Cat*>(a)) c->makeSound();
+// ✅ virtual instead:
+a->makeSound();   // each type overrides makeSound() — no casting
+```
+Use `dynamic_cast` only when you genuinely need the concrete type; reach for virtual functions first.
+
+### Cost
+`dynamic_cast` does a runtime type-check (walks the hierarchy) — slower than `static_cast`. RTTI can be disabled (`-fno-rtti`) to save space — **Chromium does this** (uses its own type systems). *(bonus-track talking point.)*
+
+### Summary
+- **RTTI** = query actual type at runtime; stored in the vtable (`type_info`).
+- **`dynamic_cast<Derived*>(base)`** = safe down-cast → derived ptr, else `nullptr` (ptr) / throws `bad_cast` (ref).
+- Works **only on polymorphic types**.
+- **`typeid`** = exact-type info; `typeid(*ptr)` = actual runtime type.
+- Heavy `dynamic_cast` = design smell → prefer virtual functions.
+- One of the **four casts** (full treatment in Topic 6).
+
+---
+
+## Sub-topic 12 — The Diamond Problem & Virtual Inheritance (lighter)
+
+C++'s multiple-inheritance gotcha.
+
+### Multiple inheritance + the diamond
+C++ allows inheriting from more than one base. When two bases share a **common** base, you get a diamond:
+```cpp
+class A { public: int value; };
+class B : public A { };
+class C : public A { };
+class D : public B, public C { };
+```
+```
+        A
+       / \
+      B   C
+       \ /
+        D
+```
+
+### The problem: two copies of A
+`D` inherits `A` through **both** `B` and `C` → **two separate copies** of `A`'s members:
+```cpp
+D d;
+d.value = 5;      // ❌ AMBIGUOUS — B's A::value or C's A::value?
+d.B::value = 5;   // the A-copy via B
+d.C::value = 10;  // a DIFFERENT A-copy via C
+```
+
+### The fix: virtual inheritance
+Mark `A` inheritance `virtual` in both `B` and `C` → share **one** `A`:
+```cpp
+class A { public: int value; };
+class B : virtual public A { };
+class C : virtual public A { };
+class D : public B, public C { };
+
+D d;
+d.value = 5;   // ✅ only ONE shared A — no ambiguity
+```
+```
+        A       ← ONE shared A
+       / \
+      B   C
+       \ /
+        D
+```
+
+### Mechanism (light)
+With virtual inheritance the shared base isn't at a fixed per-path offset, so the compiler adds a hidden indirection (a vbase pointer) so `B` and `C` both find the *one* shared `A`. Small runtime cost → why it isn't the default.
+
+### Practical reality
+> Multiple inheritance and the diamond are **rare** in real code — mostly relevant when combining **interfaces** (abstract classes, no data), where there's no data to duplicate so the diamond is harmless (often no `virtual` needed).
+```cpp
+class Drawable     { public: virtual void draw() = 0; };
+class Serializable { public: virtual void save() = 0; };
+class Widget : public Drawable, public Serializable { /* implements both */ };  // MI done well
+```
+
+### 💡 Doubts clarified (with memory layouts)
+
+#### 1. What is a "sub-object"?
+A derived object **physically contains** its base's data as a region *inside* it — that region is the **base sub-object**. Inheritance is **one object** with the base's part embedded inside it, **not** two separate linked objects.
+```cpp
+class Animal { int age; };
+class Dog : public Animal { int tailLength; };
+```
+```
+ One Dog object in memory:
+ ┌───────────────────────┐
+ │ age        (4 bytes)  │  ← the "Animal sub-object" (base region) — sits INSIDE the Dog
+ ├───────────────────────┤
+ │ tailLength (4 bytes)  │  ← Dog's own region
+ └───────────────────────┘
+```
+"Sub-object" = a *region within* the bigger object (like a kitchen is a region of a house, not a separate house). This is *why* a `Dog*` works as a `Animal*`: the Animal region is literally right there at the start.
+
+#### 2. What does "B and C don't carry their own A" mean?
+Each of B and C normally **embeds its own A sub-object**. Build a `D` (inherits both) **without** virtual inheritance → D contains a whole B *and* a whole C, each bringing its own A → **two A regions**:
+```
+ One D object (NON-virtual):          d.value → ❌ AMBIGUOUS (which A?)
+ ┌────────────────────┐
+ │ B part:            │
+ │   [ A sub-object ] │  ← A region #1 (B's own copy)
+ ├────────────────────┤
+ │ C part:            │
+ │   [ A sub-object ] │  ← A region #2 (C's own copy)
+ ├────────────────────┤
+ │ D's own members    │
+ └────────────────────┘
+```
+**Virtual** inheritance tells B and C: *don't embed your own A — there'll be ONE shared A in the D, and you each just point to it*:
+```
+ One D object (VIRTUAL):              d.value → ✅ ONE A, unambiguous
+ ┌────────────────────┐
+ │ B part: vbase ─────┼──┐
+ ├────────────────────┤  │
+ │ C part: vbase ─────┼──┤   ← both point to the SAME A
+ ├────────────────────┤  │
+ │ D's own members    │  │
+ ├────────────────────┤  │
+ │ [ A sub-object ]   │◄─┘   ← ONE shared A, placed once
+ └────────────────────┘
+```
+
+#### 3. Standalone `B` or `C` — own A, or shared?
+Their **own**. A lone `B` has exactly one A sub-object; there's nothing to share with:
+```
+ One standalone B object:
+ ┌────────────────────┐
+ │ vbase ptr ─────────┼──┐
+ │ B's own members    │  │
+ ├────────────────────┤  │
+ │ [ A sub-object ]   │◄─┘   ← its own single A
+ └────────────────────┘
+```
+Sharing only matters **within one most-derived object** reached via multiple paths (the diamond). **Rule:** *within any single object, virtual inheritance guarantees exactly ONE A, no matter how many paths reach it* — trivially one in a standalone B, collapsed-to-one in a D.
+
+#### 4. vbase pointer & "indirection" (neither is a keyword)
+- **vbase pointer** = a hidden compiler-added pointer, stored in each virtually-inheriting part, pointing to the shared base sub-object (`vbase` = *v*irtual *base*). You never write it.
+- **indirection** = the general act of accessing something by *following a pointer first* (one extra hop), instead of grabbing it at a fixed offset.
+
+**Why the pointer is needed:**
+- *Non-virtual:* the base sits at a **fixed, known offset** inside the derived object → compiler bakes in the offset → **direct** access, no pointer.
+- *Virtual:* the shared A's position **varies by whole-object layout** (in a standalone B the A is one place; inside a D it's elsewhere). B's code can't hard-code an offset → it stores a **vbase pointer** filled in at construction and **follows it at runtime** = indirection. That extra hop is the cost.
+- Even a standalone virtual-`B` carries the vbase pointer, because when compiling `B` the compiler doesn't know whether it'll later be part of a diamond — so it always uses the indirection.
+
+**vbase pointer vs vptr** (both hidden compiler pointers, different jobs):
+| Pointer | Purpose | Points to |
+|---|---|---|
+| **vptr** | dynamic dispatch (pick the right override) | the class's **vtable** (function pointers) |
+| **vbase pointer** | find the shared virtual base | the shared **base sub-object** |
+
+### Summary
+- **Diamond** = two bases share a common base → derived gets **two copies** → ambiguous access.
+- **Fix:** `virtual` inheritance → all paths share **one** base instance.
+- Small runtime indirection cost; rare in practice; mostly for combining interfaces.
+
+---
+
+## Sub-topic 13 — `override` and `final`
+
+Two C++11 keywords that make virtual functions safer and clearer.
+
+### `override` — "I intend to override; compiler, verify it"
+```cpp
+class Base    { public: virtual void speak(); };
+class Derived : public Base { public: void speak() override { } };  // compiler confirms it overrides
+```
+If it doesn't actually override (typo, wrong signature, base not virtual), the compiler **errors**.
+
+**Why it matters — catches the hiding bug (sub-topic 4):** a signature mismatch silently *hides* instead of overriding. `override` turns that into a compile error:
+```cpp
+class Base    { public: virtual void speak(int x); };
+class Derived : public Base {
+    void speak(double x) { }           // ⚠️ wrong sig → silently HIDES → polymorphism broken, compiles
+    void speak(double x) override { }   // ✅ ERROR — "doesn't override anything" → bug caught
+};
+```
+Also catches typo'd names and accidental `const`. **Best practice: always write `override` on intended overrides** — free insurance. (`override` implies `virtual`; no need to repeat it.)
+
+### `final` — "no further overriding/inheritance"
+**On a virtual function** — can't be overridden further:
+```cpp
+class Derived : public Base { public: void speak() final { } };
+class Deeper  : public Derived { void speak() { } };   // ❌ ERROR — speak is final
+```
+**On a class** — can't be inherited from:
+```cpp
+class Widget final { };
+class Sub : public Widget { };   // ❌ ERROR — Widget is final
+```
+
+**Why use `final`:**
+- **Intent** — "not meant to be extended."
+- **Prevents misuse** — locks behavior that must stay fixed.
+- **Performance** — the compiler knows there are no further overrides → can **devirtualize** the call (skip the vtable lookup, even inline).
+
+### Contrast
+| Keyword | Says | Effect |
+|---|---|---|
+| **`override`** | "I *am* overriding — verify it" | compile error if it doesn't |
+| **`final`** (method) | "this override is the last" | no further overriding |
+| **`final`** (class) | "don't inherit from me" | no derivation |
+
+Combinable: `void speak() override final { }` — overrides base *and* can't be overridden further.
+
+### Summary
+- **`override`** — compiler verifies you actually override; catches silent hiding bugs. **Always use.**
+- **`final`** — method: no further override; class: no inheritance. Documents intent + enables devirtualization.
+
+---
+
+## Sub-topic 14 — The pimpl Idiom
+
+**pimpl = "Pointer to IMPLementation"** — hide a class's implementation behind a pointer. Also called the "compilation firewall" / "opaque pointer."
+
+### The problem
+A class's **private** members still live in its **header**, visible to everyone who `#include`s it:
+```cpp
+// widget.h
+class Widget {
+public:  void doSomething();
+private: int x; std::vector<int> data; ComplicatedType helper;   // all exposed in the header
+};
+```
+1. **Leaky headers** — internals (types, their `#include`s) exposed to users.
+2. **Recompilation cascade** (the big one) — change *any* private member → header changes → **every file that includes it recompiles.** In huge codebases (Chromium) one small change → thousands of files rebuilt.
+
+### The fix — hide everything behind a pointer
+```cpp
+// widget.h  — PUBLIC header
+class Widget {
+public:
+    Widget();
+    ~Widget();                     // declared here, DEFINED in .cpp (see gotcha)
+    void doSomething();
+private:
+    class Impl;                    // forward declaration ONLY
+    std::unique_ptr<Impl> pImpl;   // the single pointer to implementation
+};
+```
+```cpp
+// widget.cpp — IMPLEMENTATION (hidden)
+class Widget::Impl {
+public:
+    int x; std::vector<int> data; ComplicatedType helper;   // real details live HERE
+    void doSomethingImpl() { /* ... */ }
+};
+Widget::Widget() : pImpl(std::make_unique<Impl>()) { }
+Widget::~Widget() = default;                                  // in .cpp, where Impl is complete
+void Widget::doSomething() { pImpl->doSomethingImpl(); }
+```
+The header now shows **no real members** — just a forward-declared `Impl` and a pointer.
+
+### Why it fixes both
+1. **Truly hidden** — header exposes only the public interface (encapsulation at the *file* level).
+2. **No recompilation cascade** — change the internals → only `widget.cpp` recompiles; the header didn't change, so nothing that includes it rebuilds. **The "compilation firewall."**
+
+### Why it works
+A **pointer to an incomplete type is fine.** To *store* a `unique_ptr<Impl>`, the compiler only needs to know `Impl` **exists** (forward declaration) — not what's inside. The full definition is only needed in the `.cpp`.
+
+### Gotchas
+- **Destructor must be in the `.cpp`.** `unique_ptr<Impl>` needs the **complete** `Impl` to destroy it. An implicit/`=default` destructor *in the header* would try to generate it where `Impl` is still incomplete → error. So declare `~Widget();` in the header, `= default` it in the `.cpp` after `Impl` is defined.
+- **Cost:** extra heap allocation for `Impl` + extra indirection per access + lost inlining. Use at **library boundaries / widely-included headers**, not every small class.
+
+### Where used
+Library/API design (stable ABI — change internals without breaking users' compiled code); large codebases to cut build times (Qt uses it heavily).
+
+### Summary
+- **pimpl** = move private members into an `Impl` class; header holds only a **forward declaration + `unique_ptr<Impl>`**.
+- **Solves:** leaky headers + the **recompilation cascade** (internal changes rebuild only the `.cpp`).
+- **Works because** a pointer to an incomplete type is legal.
+- **Gotcha:** destructor in the `.cpp` (unique_ptr needs complete `Impl`).
+- **Cost:** allocation + indirection → use where it pays off.
+
+---
+
 ## Code examples in this folder
 
 | File | Demonstrates |
 |------|--------------|
 | `vtable_demo.cpp` | `sizeof` proof of the hidden vptr; dynamic dispatch (derived runs via base ptr); the non-virtual "surprise" (base runs) |
 | `slicing_demo.cpp` | Object slicing: by-value copy & pass-by-value lose the derived part (base runs); reference/pointer keep it (derived runs) |
+| `pimpl_without.cpp` | The "normal" class — private members exposed in the header + the recompilation-cascade problem (commented) |
+| `pimpl_with.cpp` | The pimpl fix — header shows only `class Impl;` + `unique_ptr`; all details hidden in the .cpp part |
