@@ -109,7 +109,7 @@ For every topic, your daily note should answer four things:
 
 ---
 
-## TIER 2 — Strong differentiators
+## TIER 2 — Strong differentiators (start date : 3/8/2026)
 *Modern C++, STL internals, concurrency.*
 
 ### 7. ⭐ Move semantics & rvalue references (4 days)
