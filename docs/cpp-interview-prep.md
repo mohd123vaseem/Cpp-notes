@@ -56,7 +56,7 @@ For every topic, your daily note should answer four things:
 - const member functions, const parameters/returns, `mutable`
 - ⭐ Q: "Difference between `const int*`, `int* const`, `const int* const`?"
 
-### 3. ⭐ Smart pointers (5 days) ✅ DONE *(move ctor/assign pending Topic 7)*
+### 3. ⭐ Smart pointers (5 days) ✅ DONE *(incl. hand-written `SharedPtr` at full Rule of 5)*
 *One of the most-asked topics.*
 - `unique_ptr` (sole ownership, move-only)
 - `shared_ptr` (reference counting, the control block)
@@ -112,8 +112,8 @@ For every topic, your daily note should answer four things:
 ## TIER 2 — Strong differentiators (start date : 3/8/2026)
 *Modern C++, STL internals, concurrency.*
 
-### 7. ⭐ Move semantics & rvalue references (4 days)
-*Modern-C++ favorite. → then finish the hand-written `shared_ptr` (Rule of 5).*
+### 7. ⭐ Move semantics & rvalue references (4 days) ✅ DONE
+*Modern-C++ favorite. → finished the hand-written `SharedPtr` (Rule of 5). ✅*
 - lvalue vs rvalue
 - rvalue references (`&&`)
 - `std::move` (what it actually does — just a cast!)

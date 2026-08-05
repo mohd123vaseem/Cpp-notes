@@ -21,7 +21,7 @@ Before C++11, returning or passing big objects by value meant **expensive deep c
 | 5 | **When a move happens vs a silent copy** | "When does move fall back to copy?" | ✅ Done |
 | 6 | **Copy elision / RVO / NRVO** | "What is RVO and how does it interact with move?" | ✅ Done |
 | 7 | **`std::forward` & perfect forwarding** (lighter) | "What's the difference between move and forward?" | ✅ Done |
-| 8 | ⭐ **Finish `shared_ptr`: move ctor + move assignment (Rule of 5)** | (completes Topic 3's capstone) | ⬜ Pending |
+| 8 | ⭐ **Finish `shared_ptr`: move ctor + move assignment (Rule of 5)** | (completes Topic 3's capstone) | ✅ Done — see `03-smart-pointers/shared_ptr_impl.cpp` |
 
 ---
 
@@ -486,4 +486,11 @@ wrapper(std::string("temp"));   // rvalue in → forward restores rvalue → tar
 
 | File | Demonstrates |
 |------|--------------|
-| _(added as we go)_ | |
+| `../03-smart-pointers/shared_ptr_impl.cpp` | The hand-written `SharedPtr` completed to **Rule of 5** — move ctor (O(1) pointer-steal + null source) and move assignment (self-guard → release → steal → null → `return *this`), plus moved-from destructor null-guard |
+
+**Key move-ctor/assignment lessons from finishing `SharedPtr`:**
+- Move = **steal pointers + null the source** (no refcount change — moving keeps the same owner count, unlike copy which does an atomic ++).
+- **`std::move` on a raw pointer is pointless** — raw pointers/`int`/`bool` have no move semantics; plain assignment already "steals" the address. Reserve `std::move` for resource-owning types.
+- **Null the source** so its destructor is a harmless no-op (else double-free).
+- **Guard the destructor** against a moved-from (null) state, or destroying a hollow object crashes.
+- Precedence trap: `*p -= 1` / `(*p)--` decrements the value; `*p--` accidentally decrements the **pointer**.
