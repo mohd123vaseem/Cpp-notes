@@ -131,18 +131,30 @@ For every topic, your daily note should answer four things:
 - **[ADDED]** Common algorithms: `sort`, `find`, `lower_bound`, `accumulate`, the remove-erase idiom
 - ⭐ Q: "map vs unordered_map — when and why?" / "When does a vector iterator get invalidated?" / "How is unordered_map implemented?"
 
-### 9. ⭐ Concurrency & multithreading (2 days — your strength, should go fast)
-*Critical for your systems background.*
-- `std::thread`
-- `mutex`, `lock_guard`, `unique_lock`, `scoped_lock`
-- `condition_variable`
-- `std::atomic` (basics first)
+### 9. ⭐ Concurrency & multithreading (~3 days — NOT a strength; teach thoroughly from basics)
+*Ordered basics → high-ROI. Deep memory model (memory_order, happens-before, false sharing) is in Tier 3 #14, not here.*
+
+**Part A — Fundamentals:**
+- Why concurrency / what a thread is (process vs thread, brief)
+- `std::thread` — create, **[ADDED] `join()` vs `detach()` + lifecycle** ("what if you don't join?" → `std::terminate`)
+- The core problem: **data races** (shared mutable state)
+
+**Part B — Synchronization tools:**
+- `mutex` + `lock_guard` (RAII locking)
+- **[ADDED]** `unique_lock` vs `lock_guard` vs `scoped_lock` — when each
+- `condition_variable` + **[ADDED] producer-consumer pattern + spurious wakeups** (why `while`, not `if`, in `cv.wait`)
+- `std::atomic` (basics) + **[ADDED] CAS (compare-and-swap)**
+- **[ADDED]** `shared_mutex` (reader-writer lock — many readers / one writer)
+- **[ADDED]** `std::call_once` / `once_flag` (thread-safe lazy init; Meyers singleton)
+
+**Part C — Concepts & pitfalls:**
 - Data race vs race condition
-- Deadlock (the 4 conditions, how to avoid, lock ordering)
+- **Deadlock** (the 4 conditions, avoidance, lock ordering) + **[ADDED] livelock & starvation**
+- **[ADDED]** `volatile` vs `atomic` — the gotcha: "can I use `volatile` for thread sync?" (No — knowing *why* is a strong signal)
 - Thread-safe design
-- **[ADDED]** `volatile` vs `atomic` — the gotcha: "can I use `volatile` for thread sync?" (No — and knowing *why* is a strong signal)
 - (Lighter: `async`, `future`, `promise`)
-- ⭐ Q: "Difference between mutex and atomic?" / "What causes a deadlock and how do you prevent it?" / "Make this class thread-safe."
+- → deep memory model / `memory_order` / false sharing: **Tier 3 #14**
+- ⭐ Q: "mutex vs atomic?" / "join vs detach — what if you don't join?" / "why a `while` loop around `cv.wait`?" / "what causes a deadlock & how to prevent it?" / "make this class thread-safe" / "many readers one writer?"
 - 🔧 *Your material:* Redis project's `db_mutex` + the TSan hunt.
 
 ### 10. Templates & generics (3 days)
