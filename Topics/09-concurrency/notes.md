@@ -24,7 +24,7 @@ Modern CPUs have many cores; to use them, programs run multiple **threads** at o
 |---|-----------|----------------------|--------|
 | 4 | **`mutex` + `lock_guard`** (RAII locking) | "How does a mutex work?" | ✅ Done |
 | 5 | **`unique_lock` vs `lock_guard` vs `scoped_lock`** | "When each?" | ✅ Done |
-| 6 | **`condition_variable`** + producer-consumer + spurious wakeups | "Why `while` not `if` around `cv.wait`?" | ⬜ Pending |
+| 6 | **`condition_variable`** + producer-consumer + spurious wakeups | "Why `while` not `if` around `cv.wait`?" | ✅ Done |
 | 7 | **`std::atomic`** + CAS (compare-and-swap) | "mutex vs atomic?" | ⬜ Pending |
 | 8 | **`shared_mutex`** (reader-writer lock) | "Many readers, one writer?" | ⬜ Pending |
 | 9 | **`std::call_once` / `once_flag`** (thread-safe init) | "Thread-safe singleton?" | ⬜ Pending |
@@ -386,6 +386,160 @@ Early unlock / re-lock / defer / move / CV? → unique_lock
 
 ---
 
+## Sub-topic 6 — `condition_variable`
+
+### The problem: waiting without wasting CPU
+A thread often needs to **wait until something becomes true** (e.g. a worker waiting for an item in a queue). Without a CV you'd **busy-wait** (spin):
+```cpp
+while (queue.empty()) { /* check... check... check... */ }   // ❌ burns 100% CPU doing nothing
+```
+A **`condition_variable`** (`<condition_variable>`) lets a thread **sleep (zero CPU)** until another thread **signals** it. *"Don't call me, I'll call you."*
+- **`wait()`** — go to sleep until notified.
+- **`notify_one()` / `notify_all()`** — wake one / all waiters.
+
+### Real-world picture (restaurant)
+- **Producer = chef** — cooks dishes, puts them on a counter.
+- **Consumer = waiter** — takes dishes to customers.
+- **counter = shared queue.** When no dishes are ready, the waiter **waits**; the chef **rings a bell** (the CV) when a dish is ready.
+
+### Complete producer-consumer (two real threads)
+```cpp
+queue<int> q;                  // shared counter (dishes)
+mutex m;                       // protects the queue
+condition_variable cv;         // the "bell"
+
+void chef() {                                  // PRODUCER
+    for (int dish = 1; dish <= 5; dish++) {
+        this_thread::sleep_for(chrono::milliseconds(500));   // cooking takes time
+        {
+            lock_guard<mutex> lock(m);
+            q.push(dish);                      // put dish on the counter
+        }
+        cv.notify_one();                       // RING THE BELL: "a dish is ready!"
+    }
+}
+
+void waiter() {                                // CONSUMER
+    for (int served = 1; served <= 5; served++) {
+        unique_lock<mutex> lock(m);            // unique_lock — required by wait()
+        cv.wait(lock, []{ return !q.empty(); });   // sleep until a dish exists
+        int dish = q.front(); 
+        q.pop();         // take the dish
+    }
+}
+
+int main() {
+    thread t1(chef), t2(waiter);   // two threads running at once
+    t1.join(); t2.join();
+}
+```
+
+### Breaking down `cv.wait(lock, []{ return !q.empty(); })`
+**Piece 1 — `[]{ return !q.empty(); }` is a LAMBDA** (a tiny nameless function). Equivalent to:
+```cpp
+bool isDishReady() { return !q.empty(); }   // true when the queue is NOT empty
+```
+`[]` starts the lambda (empty capture — ignore for now); `{ ... }` is the body. It answers: *"is there a dish ready? (true/false)."*
+
+**Piece 2 — `cv.wait(lock, condition)` means "sleep until the condition is true":**
+> *"Go to sleep. Keep sleeping while the queue is EMPTY. Wake up and continue only when it's NOT empty."* `wait` **calls the lambda** to decide whether to keep sleeping.
+
+**Piece 3 — what `wait` does step-by-step:**
+```
+1. call the lambda → queue non-empty?  YES → continue.  NO → step 2.
+2. UNLOCK the mutex and SLEEP        (so the chef CAN lock it and add a dish)
+3. notified → WAKE UP, RE-LOCK the mutex
+4. call the lambda AGAIN → non-empty? YES → continue (grab dish). NO → back to step 2.
+```
+
+### Why `wait` needs a `unique_lock` (sub-topic 5 payoff)
+The consumer holds the mutex protecting the queue. If it slept **while holding** the lock, the producer could never lock it to add an item → sleep forever = deadlock. So `wait` **unlocks while asleep** (letting the producer work) and **re-locks on wakeup** — needing a lock that can unlock+relock = `unique_lock` (not `lock_guard`).
+
+> One line: `cv.wait(lock, []{ return !q.empty(); })` = *"sleep here until the queue has something; check via this little function; if still empty keep sleeping; when there's an item, wake and continue."* The lambda is just the condition you're waiting for.
+
+### notify_one vs notify_all
+- **`notify_one()`** — wake **one** waiter (cheaper). Use when only one can proceed (one item → one consumer).
+- **`notify_all()`** — wake **all** waiters. Use when several could proceed, or waiters wait on different conditions.
+
+### (Q1) How `wait` unlocks & re-locks — the internal code + timeline
+It "knows" the mutex because **you pass it the `unique_lock`**; it calls `.unlock()`/`.lock()` on that object.
+```cpp
+// two-arg version (what you call):
+void wait(unique_lock<mutex>& lock, Predicate pred) {
+    while (!pred()) {   // !pred() = "queue EMPTY?" → loop = "sleep WHILE empty"
+        wait(lock);
+    }
+}
+// one-arg core:
+void wait(unique_lock<mutex>& lock) {
+    lock.unlock();     // (A) release
+    // ===== SLEEP HERE =====   ← mutex is UNLOCKED this whole time
+    lock.lock();       // (B) re-acquire — runs only AFTER waking
+}
+```
+**Key:** `while (!pred())` = *sleep only WHILE the queue is EMPTY.* If there's an item, `!pred()` is false → loop **skipped** → no unlock, no sleep → grab the item under the lock. The unlock+sleep happens **only** when there's nothing to do.
+
+**The re-lock (B) does NOT block the producer** — it runs *after* waking, which is *after* the producer already added the item and released its lock. During the whole sleep the mutex is FREE. Timeline:
+```
+TIME  CONSUMER (waiter)              PRODUCER (chef)           MUTEX
+──────────────────────────────────────────────────────────────────────
+ 1    enters wait(), queue empty                              held by consumer
+ 2    (A) lock.unlock()                                       FREE ✅
+ 3    ...sleeping (stuck before B)...                         FREE
+ 4    ...sleeping...                  lock() → gets it         held by PRODUCER
+ 5    ...sleeping...                  q.push(item)             held by producer
+ 6    ...sleeping...                  unlock (lock_guard ends) FREE ✅
+ 7    ...sleeping...                  cv.notify_one()          FREE
+ 8    WAKES (because of notify)                               FREE
+ 9    (B) lock.lock() → gets it                               held by CONSUMER
+10    re-check predicate: not empty!                          held by consumer
+11    grab item, then unlock                                  FREE
+```
+Rows 2–7: while the consumer sleeps the mutex is **FREE**, so the producer adds the item with no blocking. (B) at row 9 runs only after the producer is done.
+
+**Why re-lock at all?** After `wait` returns you need the lock to safely **re-check the predicate** (reads the queue) and **grab the item** (`front`/`pop` modify the queue). It holds the lock only microseconds, then releases.
+> Trap to avoid: picturing "unlock → lock" as back-to-back. There's a **sleep in between**, and the producer does its work *during* that sleep while the mutex is free. The re-lock is on the far side of the sleep.
+
+### Spurious wakeups (Q2) — and why `while`, not `if`
+A **spurious wakeup** = a sleeping thread **wakes from `wait` even though NOBODY called `notify`** — it just wakes on its own.
+
+**Why:** it's an OS/hardware reality. The low-level primitive `condition_variable` is built on (a "futex" on Linux) is *allowed* to wake spuriously, because *guaranteeing* "only wake on a real notify" would make the common case slower. So the standard says: **`wait` may return without a notification.** A wakeup does NOT mean the condition is true.
+
+**Handled by the `while` loop** inside `wait`:
+```cpp
+while (!pred()) { wait(lock); }   // after waking, RE-CHECK; if still false → sleep again
+```
+- Spurious wakeup → re-check → still false → back to sleep. Safe.
+- With `if` instead: you'd proceed on a false condition → e.g. pop an empty queue → crash.
+- Also handles **stolen items**: 2 consumers wake on `notify_all`, one grabs the item; the other re-checks, sees empty, sleeps again.
+> ⭐ **Rule: always re-check the condition in a `while` loop** (or use the predicate form `cv.wait(lock, pred)`, which does the loop for you). Never a bare `if`.
+
+### 🔑 (Q3) Isn't the loop just busy-waiting? — NO (the key insight)
+Both a busy-wait and the CV have a loop. The difference is **what happens between checks.**
+
+**Busy-wait (bad):**
+```cpp
+while (q.empty()) { }   // checks MILLIONS of times/sec, thread keeps RUNNING → 100% of a core
+```
+**condition_variable (good):**
+```cpp
+while (!pred()) { wait(lock); }   // if false → wait() SLEEPS the thread (suspended by OS) → ~0% CPU
+```
+When the condition is false, the CV loop doesn't re-check immediately — `wait()` **puts the thread to sleep** (removed from the CPU scheduler → zero CPU). It only wakes (and loops back to check) on a `notify` (or rare spurious). So the loop body runs a **handful of times** (once per notify), not millions.
+
+| | Busy-wait loop | condition_variable loop |
+|---|---|---|
+| Between checks | **keeps running** (spins) | **sleeps** (suspended) |
+| Checks/sec | millions | a handful (per notify) |
+| CPU while waiting | **100% of a core** | **~0%** |
+| Woken by | nothing (never stops) | `notify` (or rare spurious) |
+
+> Both loop — but `wait()` makes the thread **sleep (0% CPU)** between iterations instead of **spin (100%)**. The loop runs only when something happened, not continuously. *That's* how the CV saves CPU.
+
+**Analogy:** busy-wait = shouting "ready?! ready?!" 10,000×/sec (exhausting, useless). CV = napping until the chef taps your shoulder; you check once, take the dish, nap again.
+
+---
+
 ## Code examples in this folder
 
 | File | Demonstrates |
@@ -395,3 +549,4 @@ Early unlock / re-lock / defer / move / CV? → unique_lock
 | `mutex_fix.cpp` | Same program **fixed** with `mutex` + `lock_guard` → exactly 2,000,000 every run. |
 | `lock_wrappers.cpp` | `lock_guard` (default), `unique_lock` (early unlock / re-lock), `scoped_lock` (two mutexes at once) |
 | `deadlock_scoped_lock.cpp` | Multi-mutex **deadlock** (opposite lock orders, guarded/hangs) + the **`scoped_lock` fix** |
+| `producer_consumer.cpp` | Classic **producer-consumer** with `condition_variable`: chef produces dishes, waiter sleeps-until-notified & consumes; `done` flag to finish cleanly |
