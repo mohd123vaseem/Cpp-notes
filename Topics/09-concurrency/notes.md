@@ -25,14 +25,14 @@ Modern CPUs have many cores; to use them, programs run multiple **threads** at o
 | 4 | **`mutex` + `lock_guard`** (RAII locking) | "How does a mutex work?" | ✅ Done |
 | 5 | **`unique_lock` vs `lock_guard` vs `scoped_lock`** | "When each?" | ✅ Done |
 | 6 | **`condition_variable`** + producer-consumer + spurious wakeups | "Why `while` not `if` around `cv.wait`?" | ✅ Done |
-| 7 | **`std::atomic`** + CAS (compare-and-swap) | "mutex vs atomic?" | ⬜ Pending |
-| 8 | **`shared_mutex`** (reader-writer lock) | "Many readers, one writer?" | ⬜ Pending |
-| 9 | **`std::call_once` / `once_flag`** (thread-safe init) | "Thread-safe singleton?" | ⬜ Pending |
+| 7 | **`std::atomic`** + CAS (compare-and-swap) | "mutex vs atomic?" | ✅ Done |
+| 8 | **`shared_mutex`** (reader-writer lock) | "Many readers, one writer?" | ✅ Done |
+| 9 | **`std::call_once` / `once_flag`** (thread-safe init) | "Thread-safe singleton?" | ✅ Done |
 
 ### Part C — Concepts & pitfalls
 | # | Sub-topic | The classic question | Status |
 |---|-----------|----------------------|--------|
-| 10 | **Data race vs race condition** | "Difference between them?" | ⬜ Pending |
+| 10 | **Data race vs race condition** | "Difference between them?" | ✅ Done |
 | 11 | **Deadlock** (4 conditions, avoidance) + **livelock & starvation** | "What causes a deadlock, how to prevent?" | ⬜ Pending |
 | 12 | **`volatile` vs `atomic`** | "Can I use `volatile` for thread sync?" | ⬜ Pending |
 | 13 | **Thread-safe design** | "Make this class thread-safe." | ⬜ Pending |
@@ -514,6 +514,8 @@ while (!pred()) { wait(lock); }   // after waking, RE-CHECK; if still false → 
 - Also handles **stolen items**: 2 consumers wake on `notify_all`, one grabs the item; the other re-checks, sees empty, sleeps again.
 > ⭐ **Rule: always re-check the condition in a `while` loop** (or use the predicate form `cv.wait(lock, pred)`, which does the loop for you). Never a bare `if`.
 
+**`if` vs `while` in one line:** `if` checks the condition **once before sleeping**, then trusts the wakeup blindly → proceeds on a false condition → crash. `while` **re-checks every time it wakes** → if still false, sleeps again. You re-check because **a wakeup does NOT guarantee the condition is true** — it can be (1) a **spurious wakeup** (nobody notified) or (2) a **stolen item** (2 consumers wake on one `notify_all`, the first takes the item, the second must see it's gone and sleep again). A wakeup is a *hint to re-check*, not a *guarantee*.
+
 ### 🔑 (Q3) Isn't the loop just busy-waiting? — NO (the key insight)
 Both a busy-wait and the CV have a loop. The difference is **what happens between checks.**
 
@@ -540,6 +542,286 @@ When the condition is false, the CV loop doesn't re-check immediately — `wait(
 
 ---
 
+## Sub-topic 7 — `std::atomic` + CAS
+
+### Simple: atomic = indivisible
+An **atomic operation** happens in **one uninterruptible step** — no thread sees it half-done, none can slip in the middle. `std::atomic<T>` (`<atomic>`) wraps a variable so its operations are atomic:
+```cpp
+std::atomic<int> counter = 0;
+counter++;    // ONE indivisible operation — can't be interrupted
+```
+
+### The WHY
+The data race (sub-topic 3) came from `counter++` being 3 steps (read→modify→write) with a race window between them. A **mutex** fixes it but is heavyweight for a single variable (lock/unlock, others block). **`std::atomic` is the lighter fix**: it makes `counter++` a **single indivisible hardware instruction** — no interleaving, no lost updates, **no lock**.
+> Mutex serializes with a *lock*; atomic makes the operation itself *indivisible* at the hardware level. For one variable, atomic is cheaper.
+
+```cpp
+int              counter;   counter++;   // ❌ 3 steps → race
+std::mutex m;    counter++;              // ✅ works, but lock/block overhead
+std::atomic<int> counter;   counter++;   // ✅ one atomic hardware op, no lock, no blocking
+```
+Fixing the sub-topic-3 counter: `std::atomic<int> counter = 0;` → the 1M-increment loop gives exactly 2,000,000, no mutex.
+
+### How it's atomic without a lock
+CPUs have hardware instructions that do read-modify-write as one uninterruptible step (e.g. `LOCK XADD` on x86). `std::atomic` compiles to these → **lock-free** for basic types (no mutex, just one CPU instruction the hardware won't split).
+
+### Operations
+```cpp
+x.store(5);        x.load();          // atomic write / read
+x.fetch_add(3);    x.fetch_sub(2);    // atomic add/sub (return old value)
+x.exchange(10);                       // atomic set, return old
+```
+
+### CAS — Compare-And-Swap (the fundamental primitive)
+> **"Atomically: if the variable still equals what I EXPECT, replace it with a NEW value; else fail and tell me the actual value — change nothing."**
+```cpp
+std::atomic<int> x = 10;
+int expected = 10;
+bool ok = x.compare_exchange_strong(expected, 20);
+// if x == 10 → set x = 20, return true.
+// if x != 10 → set expected = x's actual value, return false.
+```
+**Why CAS:** to update a variable **based on its current value** safely (another thread might change it between your read and write). CAS applies your update **only if nobody changed it since you read it**. Classic use = **retry loop** (basis of lock-free algorithms):
+```cpp
+int old = x.load();
+while (!x.compare_exchange_strong(old, old * 2)) {
+    // failed → someone changed x → `old` now holds x's new value → retry
+}
+```
+Keeps retrying until the update lands on an unchanged value. "Check-then-act" done as one indivisible step.
+
+### atomic vs mutex (interview Q)
+| | `std::atomic` | `std::mutex` |
+|---|---|---|
+| Protects | a **single variable** | any code / **multiple variables** |
+| Mechanism | one hardware instruction (**lock-free**) | a software **lock** (threads block) |
+| Cost | cheap (no blocking) | heavier (lock/unlock, waiting) |
+| Use for | counters, flags | critical section over multiple vars |
+
+Need a **mutex**, not atomic, when things must change together:
+```cpp
+balance -= amount;      // these two must happen as ONE consistent unit →
+log.push_back(amount);  // atomic protects each alone, not the pair → use a mutex
+```
+
+### Summary
+- **`std::atomic<T>`** = indivisible ops on a variable, **no lock** (lock-free basic types).
+- **Why:** light fix for a single-variable race — `counter++` becomes one atomic op vs a 3-step race.
+- Ops: `load/store/fetch_add/exchange` + **CAS** (`compare_exchange_strong`).
+- **CAS** = "if still equals expected, swap; else fail" → retry loops, lock-free algorithms.
+- **atomic** = single var, cheap; **mutex** = multiple vars / critical section, heavier.
+
+---
+
+## Sub-topic 8 — `shared_mutex` (Reader-Writer Lock)
+
+### Simple: a lock that distinguishes readers from writers
+`std::shared_mutex` (`<shared_mutex>`, C++17) has **two** locking modes:
+- **Shared (read) lock** — **many** threads hold it at once → for *readers*.
+- **Exclusive (write) lock** — only **one** thread, **no readers** allowed → for *writers*.
+```
+Many readers together:  R R R R    ← all allowed at once (shared lock)
+One writer alone:        W          ← exclusive; blocks ALL readers & writers
+```
+
+### The WHY
+Data races need **≥1 writer** (sub-topic 3). Two threads just **reading** (nobody writing) is **safe** — reads don't change anything. But a plain `mutex` blocks *everyone*, serializing even pure readers → needless bottleneck for **read-heavy** data (config, caches, lookup tables).
+> Insight: concurrent reads are safe; only writes need exclusivity. `shared_mutex` lets readers run in parallel and locks exclusively only for writes.
+
+### Code
+```cpp
+std::shared_mutex rw;
+int data = 0;
+
+int read() {
+    std::shared_lock<std::shared_mutex> lock(rw);   // SHARED — readers don't block each other
+    return data;
+}
+void write(int v) {
+    std::unique_lock<std::shared_mutex> lock(rw);   // EXCLUSIVE — alone, no readers
+    data = v;
+}
+```
+- **`std::shared_lock`** → shared (read) lock. **`std::unique_lock`/`lock_guard`** → exclusive (write) lock.
+
+### Rules (who holds it when)
+| While held as… | Another reader can join? | A writer can enter? |
+|---|---|---|
+| **Shared (read)** | ✅ yes | ❌ no (waits for readers to leave) |
+| **Exclusive (write)** | ❌ no | ❌ no |
+Readers coexist; a writer needs the place to itself.
+
+### When to use / not
+- **Use** for **read-heavy** data (reads ≫ writes) — reader parallelism pays off.
+- **Don't** for balanced/write-heavy — `shared_mutex` has **more overhead** than plain `mutex` (tracks reader counts); a plain `mutex` is faster. Single value → `atomic`.
+- **Caveat: writer starvation** — constant readers can starve a waiting writer (good impls mitigate by blocking new readers once a writer waits).
+
+### 🔑 Q: if concurrent reads are safe, why lock readers at all? Just don't lock them!
+The shared lock on readers is **NOT** to protect readers from each other (they're fine together). It's to protect readers from **WRITERS**. Without any lock, a **writer could modify the data *while* a reader is reading it** → the reader sees **half-updated / torn / inconsistent** data (a **read-write data race**).
+
+The shared and exclusive locks are **mutually exclusive with each other**:
+- While readers hold the **shared** lock, a writer's **exclusive** lock **must wait** → no writing mid-read.
+- While a writer holds the **exclusive** lock, readers' **shared** locks **must wait** → no reading mid-write.
+
+So readers take the shared lock **not to coordinate with other readers, but to block writers** (and be blocked by a writer). If readers took no lock, nothing would stop a writer from scribbling on the data they're reading → corruption.
+> Your hypothesis is exactly right: the lock exists because of the **reader↔writer race** (reading a section about to be overwritten). Readers can share *with each other*, but must still exclude *writers* — which is what taking the shared lock does.
+
+### Summary
+- **`shared_mutex`** = reader-writer lock: **shared** (many readers) vs **exclusive** (one writer, no readers).
+- **Why:** reads are safe together; a plain mutex needlessly serializes them.
+- **Readers lock to exclude WRITERS**, not each other — prevents the read↔write race (reading mid-write = torn data).
+- Use for **read-heavy** data; plain `mutex` for balanced/write-heavy; `atomic` for a single value. Watch for **writer starvation**.
+
+---
+
+## Sub-topic 9 — `std::call_once` / `once_flag`
+
+### Simple: run something exactly once, across all threads
+`std::call_once` (`<mutex>`) runs a piece of code **exactly one time**, no matter how many threads reach it. The **first** thread runs it; others **wait** for it to finish, then **skip** it (and just use the result).
+```cpp
+std::once_flag flag;
+void init() {
+    std::call_once(flag, []{ /* runs EXACTLY once, ever */ });
+}
+```
+`std::once_flag` = a bookkeeping object remembering "already done?".
+
+### The WHY — thread-safe lazy initialization
+You want to set something up **once, on first use** (load config, open a DB, build a table). Single-threaded is easy:
+```cpp
+if (res == nullptr) res = new Resource();   // init once
+```
+But multi-threaded this is a **data race** (check-then-act):
+```
+Thread A: res==nullptr? TRUE, about to create...
+Thread B: res==nullptr? TRUE too! (A not done yet)
+A: res = new Resource()   → resource #1
+B: res = new Resource()   → resource #2 (overwrites → leak / two DB connections!)
+```
+Both see null → both initialize → two setups.
+
+### call_once vs mutex-every-call
+```cpp
+// mutex works but locks on EVERY call forever (wasteful long after init):
+std::lock_guard lock(m); if (!res) res = new Resource();
+
+// call_once — purpose-built: init once, near-free afterward:
+std::call_once(flag, []{ res = new Resource(); });
+```
+First thread inits; others wait; after that, `call_once` just checks the flag with almost no overhead. Exactly one init, guaranteed.
+> Core idea: **the first thread creates it; every later thread/call just USES the already-created thing** (threads arriving mid-init wait, then use it — never re-create).
+
+### Classic use: thread-safe Singleton
+```cpp
+class Singleton {
+    static Singleton* instance;
+    static std::once_flag flag;
+public:
+    static Singleton* get() {
+        std::call_once(flag, []{ instance = new Singleton(); });  // created once, thread-safe
+        return instance;
+    }
+};
+```
+Without `call_once`, two first-time callers could create **two** singletons.
+
+### 🔑 Modern alternative: the Meyers singleton (C++11)
+A function-local **`static`** is guaranteed **initialized exactly once, thread-safely**, since C++11 (compiler inserts the equivalent of `call_once`):
+```cpp
+Singleton& get() {
+    static Singleton instance;   // once + thread-safe, on first call
+    return instance;
+}
+```
+Cleanest for a simple singleton. Use `call_once` for more general one-time init. **Know both for interviews.**
+
+### Summary
+- **`std::call_once(flag, fn)`** = run `fn` once across all threads (others wait, then use the result). Needs `std::once_flag`.
+- **Why:** thread-safe **lazy init** — naive `if(!init) init()` is a data race; mutex-every-call is wasteful; `call_once` inits once, near-free after.
+- **First thread creates it; the rest just use the already-created thing.**
+- Use: **thread-safe singleton**. Modern one-liner: **Meyers singleton** (`static` local, C++11 thread-safe).
+
+---
+
+## Sub-topic 10 — Data Race vs Race Condition
+
+### Simple: they sound the same, they're not
+- **Data race** = *low-level, technical*: **unsynchronized concurrent access to the same memory, ≥1 write.** About *memory access*. Always **UB**.
+- **Race condition** = *high-level, logical*: **program correctness depends on thread timing/ordering.** About *outcomes*.
+
+They **overlap but neither contains the other** — you can have one without the other.
+
+### Data race — memory-level (sub-topic 3)
+```cpp
+int counter = 0;
+// A: counter++;  B: counter++;   // unsynchronized, both write → UB
+```
+Fix = **synchronization** (mutex/atomic). Once added, the data race is gone.
+
+### Race condition — logic-level (subtle!)
+Different results depending on thread order — and **you can have it with NO data race.** Bank withdrawal:
+```cpp
+std::atomic<int> balance = 100;   // atomic! NO data race on balance
+void withdraw(int amount) {
+    if (balance >= amount)        // (1) CHECK — atomic, safe alone
+        balance -= amount;        // (2) ACT   — atomic, safe alone
+}
+```
+Two threads `withdraw(100)` on balance 100:
+```
+A: check 100>=100 → TRUE
+B: check 100>=100 → TRUE   (A hasn't subtracted yet)
+A: balance -= 100 → 0
+B: balance -= 100 → -100   ❌ overdrawn!
+```
+**No data race** (every access atomic), but a **race condition** — the CHECK and ACT are separate steps and another thread slipped between. Classic **check-then-act** race.
+
+### 🔑 Fixing the data race does NOT fix the race condition
+Making `balance` atomic removed the data race but did nothing for the race condition — the problem is that **check+act must be ONE indivisible unit.** Fix with a **mutex**:
+```cpp
+std::mutex m; int balance = 100;
+void withdraw(int amount) {
+    std::lock_guard<std::mutex> lock(m);   // whole check+act = one critical section
+    if (balance >= amount) balance -= amount;
+}
+```
+Now nothing slips between check and act. *(This is why atomic-on-one-variable isn't always enough — sub-topic 7.)*
+
+### The four combinations
+| | Data race? | Race condition? | Example |
+|---|---|---|---|
+| **Both** | ✅ | ✅ | unsynchronized `counter++` |
+| **RC, no data race** | ❌ | ✅ | atomic `balance` check-then-act (the subtle case) |
+| **Data race, no RC** | ✅ | ❌ | benign unsynchronized write logic doesn't depend on (still UB) |
+| **Neither** | ❌ | ❌ | properly synchronized |
+
+### 🔑 CRUCIAL clarification: why atomic fixes the counter but NOT the bank
+**Atomic makes a SINGLE operation indivisible.** So:
+- **`counter++` = ONE operation** → `atomic<int>` makes it indivisible → the "both read 0" gap is gone → reaches exactly 2,000,000. ✅ **Atomic fully fixes it.** (Two threads *cannot* both read 0: an atomic increment is one uninterruptible hardware instruction; the other thread is locked out mid-op and reads the already-updated value.)
+- **bank `withdraw` = TWO operations** (check THEN act). Atomic makes each *alone* indivisible, but **cannot fuse check-and-act into one unit** → another thread slips between → still wrong → needs a **mutex** (or a CAS loop) to make the *whole sequence* indivisible.
+
+> Rule: **`atomic` → single operation. `mutex` → multi-step (compound) operation.** The counter is single; the withdrawal is compound.
+
+### 🔑 "Wrong result" ≠ "data race" (terminology)
+- **Data race** = a statement about **HOW memory is accessed** (unsynchronized access + write). The *mechanism*.
+- **Race condition** = a statement about **the OUTCOME** (wrong result depending on timing). The *result*.
+
+A wrong result does **not** by itself mean "data race." The atomic bank ending at −100 is a **race condition** but **NOT a data race** — because every access *was* synchronized (atomic). Compare:
+| | Access synced? | Result wrong? | Data race? | Race condition? |
+|---|---|---|---|---|
+| plain `counter++` | ❌ | ✅ (<2M) | ✅ **yes** | ✅ yes |
+| atomic `counter++` | ✅ | ❌ (=2M) | ❌ | ❌ |
+| atomic bank `withdraw` | ✅ | ✅ (−100) | ❌ **no** | ✅ yes |
+Both atomic rows → **not** data races (accesses synced). Counter is fully fixed; bank is still a **race condition** (compound op). Don't equate "data is wrong" with "data race" — data race = *unsynchronized access*, not *wrong answer*.
+
+### Summary
+- **Data race** = memory-level, unsynchronized access + write → UB. Fix: synchronization.
+- **Race condition** = logic-level, correctness depends on timing → wrong results.
+- **Overlap but differ**; subtle case = **race condition with NO data race** (check-then-act on an atomic).
+- **Fixing the data race ≠ fixing the race condition** — atomic protects one access; a **mutex** makes a whole operation indivisible.
+
+---
+
 ## Code examples in this folder
 
 | File | Demonstrates |
@@ -550,3 +832,6 @@ When the condition is false, the CV loop doesn't re-check immediately — `wait(
 | `lock_wrappers.cpp` | `lock_guard` (default), `unique_lock` (early unlock / re-lock), `scoped_lock` (two mutexes at once) |
 | `deadlock_scoped_lock.cpp` | Multi-mutex **deadlock** (opposite lock orders, guarded/hangs) + the **`scoped_lock` fix** |
 | `producer_consumer.cpp` | Classic **producer-consumer** with `condition_variable`: chef produces dishes, waiter sleeps-until-notified & consumes; `done` flag to finish cleanly |
+| `atomic_cas.cpp` | Counter race fixed with `std::atomic` (no mutex) + a **CAS retry loop** (atomically double a value across 10 threads → 1024) |
+| `shared_mutex_demo.cpp` | Reader-writer lock: 4 readers share the read lock concurrently; 1 writer takes the exclusive lock (no readers during writes) |
+| `call_once_demo.cpp` | 8 threads call `getResource()`; the initializer runs **exactly once** (first thread creates it, the rest reuse it) |
