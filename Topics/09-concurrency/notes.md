@@ -33,7 +33,7 @@ Modern CPUs have many cores; to use them, programs run multiple **threads** at o
 | # | Sub-topic | The classic question | Status |
 |---|-----------|----------------------|--------|
 | 10 | **Data race vs race condition** | "Difference between them?" | ✅ Done |
-| 11 | **Deadlock** (4 conditions, avoidance) + **livelock & starvation** | "What causes a deadlock, how to prevent?" | ⬜ Pending |
+| 11 | **Deadlock** (4 conditions, avoidance) + **livelock & starvation** | "What causes a deadlock, how to prevent?" | ✅ Done |
 | 12 | **`volatile` vs `atomic`** | "Can I use `volatile` for thread sync?" | ⬜ Pending |
 | 13 | **Thread-safe design** | "Make this class thread-safe." | ⬜ Pending |
 | 14 | **`async` / `future` / `promise`** (lighter) | "What's `std::async`?" | ⬜ Pending |
@@ -819,6 +819,54 @@ Both atomic rows → **not** data races (accesses synced). Counter is fully fixe
 - **Race condition** = logic-level, correctness depends on timing → wrong results.
 - **Overlap but differ**; subtle case = **race condition with NO data race** (check-then-act on an atomic).
 - **Fixing the data race ≠ fixing the race condition** — atomic protects one access; a **mutex** makes a whole operation indivisible.
+
+---
+
+## Sub-topic 11 — Deadlock, Livelock & Starvation
+
+### Deadlock — everyone stuck forever
+Two+ threads each **wait for a resource the other holds** → none can proceed.
+```cpp
+std::mutex m1, m2;
+// Thread A: lock(m1); lock(m2);   // A holds m1, waits for m2  ┐
+// Thread B: lock(m2); lock(m1);   // B holds m2, waits for m1  ┘ → circular wait → FROZEN
+```
+
+### ⭐ The 4 Coffman conditions (ALL must hold)
+1. **Mutual exclusion** — a resource is held by only one thread at a time.
+2. **Hold and wait** — a thread holds one resource while waiting for another.
+3. **No preemption** — a resource can't be forcibly taken; the holder must release it.
+4. **Circular wait** — a cycle of threads each waiting for what the next holds (A→B→A).
+> All four required → **break ANY one → no deadlock possible.**
+
+### Preventing deadlock (break a condition)
+1. **Lock ordering (break circular wait)** — most common fix. Always acquire mutexes in a **consistent global order** everywhere:
+   ```cpp
+   lock(m1); lock(m2);   // EVERY thread same order → no cycle
+   ```
+2. **Lock both at once (break hold-and-wait)** — `std::scoped_lock lock(m1, m2);` (grabs all together, deadlock-free).
+3. **try-lock + back-off** — `try_lock`; if it fails, release what you hold and retry.
+4. **Fewer locks** — never hold two at once → no hold-and-wait.
+> Practical rule: **consistent lock ordering** (or `scoped_lock`) prevents almost all real deadlocks.
+
+### Livelock — busy but no progress
+Threads are **actively running and changing state, but making no real progress** — they keep reacting to each other forever. *(Two people in a hallway both step left, both step right, both step left… never passing.)* Often from naive deadlock avoidance: grab lock → sense conflict → release → retry, all in lockstep.
+> **Deadlock = frozen** (blocked, doing nothing). **Livelock = active** (running) but achieving nothing — CPU looks busy, zero progress.
+
+### Starvation — one thread never gets a turn
+A thread is **perpetually denied** a resource because others keep getting it first (it's not blocked forever — it just never wins). Causes: **priority scheduling** (high-priority threads jump the queue), **writer starvation** (constant readers on a `shared_mutex`), **unfair (non-FIFO) locks**. **Fix:** fair/FIFO locks, or **aging** (boost a long-waiting thread's priority).
+
+### The three side by side
+| | What's happening | Threads are… |
+|---|---|---|
+| **Deadlock** | circular wait, each holds what the other needs | **frozen** (blocked forever) |
+| **Livelock** | reacting to each other, repeating forever | **active** but no progress |
+| **Starvation** | one thread perpetually denied its turn | **running**, one left out |
+
+### Summary
+- **Deadlock** = circular wait → all frozen. **4 Coffman conditions** (mutual exclusion, hold-and-wait, no preemption, circular wait); break any one → no deadlock.
+- **Prevent:** consistent **lock ordering** or **`scoped_lock`**; try-lock/back-off; fewer locks.
+- **Livelock** = active but no progress (keep reacting). **Starvation** = one thread perpetually denied (priority/unfair locks) → fix with fairness/FIFO or aging.
 
 ---
 
