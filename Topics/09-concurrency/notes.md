@@ -34,7 +34,7 @@ Modern CPUs have many cores; to use them, programs run multiple **threads** at o
 |---|-----------|----------------------|--------|
 | 10 | **Data race vs race condition** | "Difference between them?" | ✅ Done |
 | 11 | **Deadlock** (4 conditions, avoidance) + **livelock & starvation** | "What causes a deadlock, how to prevent?" | ✅ Done |
-| 12 | **`volatile` vs `atomic`** | "Can I use `volatile` for thread sync?" | ⬜ Pending |
+| 12 | **`volatile` vs `atomic`** | "Can I use `volatile` for thread sync?" | ✅ Done |
 | 13 | **Thread-safe design** | "Make this class thread-safe." | ⬜ Pending |
 | 14 | **`async` / `future` / `promise`** (lighter) | "What's `std::async`?" | ⬜ Pending |
 
@@ -867,6 +867,51 @@ A thread is **perpetually denied** a resource because others keep getting it fir
 - **Deadlock** = circular wait → all frozen. **4 Coffman conditions** (mutual exclusion, hold-and-wait, no preemption, circular wait); break any one → no deadlock.
 - **Prevent:** consistent **lock ordering** or **`scoped_lock`**; try-lock/back-off; fewer locks.
 - **Livelock** = active but no progress (keep reacting). **Starvation** = one thread perpetually denied (priority/unfair locks) → fix with fairness/FIFO or aging.
+
+---
+
+## Sub-topic 12 — `volatile` vs `atomic`
+
+### The trap
+> **In C++, `volatile` is NOT for thread synchronization. `std::atomic` is.** (Java/C# `volatile` *does* sync — the source of the confusion.)
+
+### What `volatile` actually does
+Tells the compiler: **"don't optimize away reads/writes to this — always really read it from memory."** Real purpose: **memory-mapped hardware & signal handlers** (values that change outside normal control flow).
+```cpp
+volatile int* sensor = (volatile int*)0x4000;
+int a = *sensor;
+int b = *sensor;   // volatile forces a REAL re-read (without it, compiler may reuse a)
+```
+That's all it does — **prevents access optimizations**, for hardware/signals.
+
+### Why `volatile` does NOT give thread safety
+It's missing the three things thread safety needs:
+1. **No atomicity** — `volatile int x; x++;` is still a 3-step read-modify-write → data race remains. Volatile forces memory access but doesn't make `x++` indivisible.
+2. **No memory-ordering guarantees** — CPUs/compilers reorder ops; thread safety needs ordering rules about what other threads see. `volatile` gives none; `atomic` does.
+3. **No mutual exclusion** — locks nothing.
+
+### What `std::atomic` gives that volatile doesn't
+- **Atomicity** — `atomic<int> x; x++;` = one indivisible op (no lost updates).
+- **Memory-ordering guarantees** (the memory model, Tier 3 #14).
+- (Also implies "don't over-optimize," so you don't need `volatile` too.)
+
+### Side-by-side
+| | `volatile` | `std::atomic` |
+|---|---|---|
+| Purpose | stop compiler **optimizing away** accesses | **thread-safe** shared access |
+| Atomic ops? | ❌ | ✅ |
+| Ordering guarantees? | ❌ | ✅ |
+| For | hardware registers, signal handlers | **multithreading** |
+| Thread-safe? | ❌ **NO** | ✅ |
+
+### ⭐ Interview answer
+> "Can I use `volatile` for thread sync?" → **No.** `volatile` only stops the compiler optimizing away accesses (for hardware/signals) — **no atomicity, no ordering** → `volatile int x; x++;` still races. Use **`std::atomic`** (or a mutex) for thread safety. Unrelated concerns.
+
+### Summary
+- **`volatile`** = "always really read/write from memory"; for **hardware/signals**, not threads.
+- No atomicity, no ordering, no mutual exclusion → **not thread-safe**.
+- **`std::atomic`** = the real tool: atomic ops + ordering guarantees.
+- Java/C# `volatile` syncs; C++ `volatile` does not.
 
 ---
 
