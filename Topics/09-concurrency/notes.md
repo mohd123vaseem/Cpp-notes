@@ -36,7 +36,7 @@ Modern CPUs have many cores; to use them, programs run multiple **threads** at o
 | 11 | **Deadlock** (4 conditions, avoidance) + **livelock & starvation** | "What causes a deadlock, how to prevent?" | ✅ Done |
 | 12 | **`volatile` vs `atomic`** | "Can I use `volatile` for thread sync?" | ✅ Done |
 | 13 | **Thread-safe design** | "Make this class thread-safe." | ✅ Done |
-| 14 | **`async` / `future` / `promise`** (lighter) | "What's `std::async`?" | ⬜ Pending |
+| 14 | **`async` / `future` / `promise`** (lighter) | "What's `std::async`?" | ✅ Done |
 
 > Deep memory model / `memory_order` / false sharing → **Tier 3 #14** (later).
 
@@ -987,6 +987,60 @@ Check-then-act across two calls races. Fix: provide a **combined atomic operatio
 
 ---
 
+## Sub-topic 14 — `async` / `future` / `promise` (lighter)
+
+### The problem
+Raw `std::thread` **can't return a value** (the function's return is discarded). Getting a result back manually needs a shared variable + mutex + condition_variable — lots of boilerplate.
+
+### `std::async` + `std::future` — run a task, collect the result
+`std::async` (`<future>`) runs a function (maybe on another thread) and returns a **`std::future`** — a placeholder for a result that isn't ready yet. Call `.get()` to retrieve it (waiting if needed).
+```cpp
+int compute() { return 42; }
+
+std::future<int> result = std::async(compute);   // starts compute()
+// ... do other work concurrently ...
+int value = result.get();                        // blocks until ready → 42
+```
+**Mental model:** a `future` = a **claim ticket** at a coat check. `async` starts the work and gives you the ticket; `.get()` hands it in (instant if ready, else waits).
+
+### Why it's nicer
+```cpp
+// ❌ raw thread: manual result + mutex + condition_variable + ready flag...
+// ✅ async: one line —
+auto fut = std::async(compute);
+int result = fut.get();
+```
+Hides all the synchronization. Also: **arguments** work (`std::async(add, 3, 4)`), and if the task **throws**, the future **re-throws** it on `.get()` (clean cross-thread error handling).
+
+### Launch policies
+```cpp
+std::async(std::launch::async,    compute);  // FORCE a new thread — concurrent now
+std::async(std::launch::deferred, compute);  // LAZY — runs on the caller when you .get()
+std::async(compute);                         // default: impl picks either (gotcha!)
+```
+Default may **not** run in parallel — pass **`std::launch::async`** if you need guaranteed concurrency.
+
+### `std::promise` — the manual version
+Lower-level: set the value in one thread, read it via a linked future in another.
+```cpp
+std::promise<int> p;
+std::future<int> fut = p.get_future();     // future linked to this promise
+std::thread t([&p]{ p.set_value(42); });   // fulfill the promise → future ready
+int value = fut.get();                     // waits, then 42
+t.join();
+```
+A **promise/future pair** = a one-way channel: **promise = writing end** (`set_value`), **future = reading end** (`get`).
+
+> Relationship: **`promise`** = manual producer end; **`future`** = consumer end; **`async`** = convenience that creates both and runs a function to fill the promise. Use `async` normally; `promise` when you must set the result yourself.
+
+### Summary
+- Raw `thread` can't return a value; `async`/`future` is the clean way.
+- **`std::async(fn)`** → returns a **`future`**; **`future.get()`** blocks until ready, re-throws exceptions.
+- **Launch policies:** `async` (new thread) vs `deferred` (lazy); default may pick either → use `launch::async` for real parallelism.
+- **`std::promise`** = manual producer end paired with a `future` reading end; `async` is the convenience layer over it.
+
+---
+
 ## Code examples in this folder
 
 | File | Demonstrates |
@@ -1001,3 +1055,4 @@ Check-then-act across two calls races. Fix: provide a **combined atomic operatio
 | `shared_mutex_demo.cpp` | Reader-writer lock: 4 readers share the read lock concurrently; 1 writer takes the exclusive lock (no readers during writes) |
 | `call_once_demo.cpp` | 8 threads call `getResource()`; the initializer runs **exactly once** (first thread creates it, the rest reuse it) |
 | `thread_safe_counter.cpp` | A self-protecting `Counter` class: private `mutable mutex`, locked reads+writes, a combined `decrementIfPositive()` op → 10 threads → exactly 1,000,000 |
+| `async_future.cpp` | `std::async`+`future` (get a return value back), exceptions propagating through `.get()`, and `std::promise`/`future` (manual result channel) |
