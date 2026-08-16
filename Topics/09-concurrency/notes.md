@@ -35,7 +35,7 @@ Modern CPUs have many cores; to use them, programs run multiple **threads** at o
 | 10 | **Data race vs race condition** | "Difference between them?" | ✅ Done |
 | 11 | **Deadlock** (4 conditions, avoidance) + **livelock & starvation** | "What causes a deadlock, how to prevent?" | ✅ Done |
 | 12 | **`volatile` vs `atomic`** | "Can I use `volatile` for thread sync?" | ✅ Done |
-| 13 | **Thread-safe design** | "Make this class thread-safe." | ⬜ Pending |
+| 13 | **Thread-safe design** | "Make this class thread-safe." | ✅ Done |
 | 14 | **`async` / `future` / `promise`** (lighter) | "What's `std::async`?" | ⬜ Pending |
 
 > Deep memory model / `memory_order` / false sharing → **Tier 3 #14** (later).
@@ -566,11 +566,18 @@ Fixing the sub-topic-3 counter: `std::atomic<int> counter = 0;` → the 1M-incre
 CPUs have hardware instructions that do read-modify-write as one uninterruptible step (e.g. `LOCK XADD` on x86). `std::atomic` compiles to these → **lock-free** for basic types (no mutex, just one CPU instruction the hardware won't split).
 
 ### Operations
-```cpp
-x.store(5);        x.load();          // atomic write / read
-x.fetch_add(3);    x.fetch_sub(2);    // atomic add/sub (return old value)
-x.exchange(10);                       // atomic set, return old
-```
+`x = 5` and `int a = x` are **shorthand** for `store`/`load` (they call them under the hood). The explicit forms exist so you can pass a `memory_order` (Tier 3 #14); the shorthand always uses the strongest ordering.
+
+| Op | What it does | Example |
+|---|---|---|
+| **`store(v)`** | atomic write | `x.store(5)` → x becomes 5 |
+| **`load()`** | atomic read | `int a = x.load()` |
+| **`fetch_add(n)`** | atomically add `n`, **return the OLD value** | `x.fetch_add(3)` (what `x += 3` calls) |
+| **`fetch_sub(n)`** | atomically subtract, return old value | `x.fetch_sub(2)` |
+| **`exchange(v)`** | atomically set to `v`, **return the old value** | `int old = x.exchange(10)` |
+| **`compare_exchange_strong`** | CAS — set if it matches expected | the retry-loop primitive (below) |
+
+The "return the **old** value" ops are useful when you need what was there before you changed it (e.g. `fetch_add` on a counter gives you *your* index).
 
 ### CAS — Compare-And-Swap (the fundamental primitive)
 > **"Atomically: if the variable still equals what I EXPECT, replace it with a NEW value; else fail and tell me the actual value — change nothing."**
@@ -915,6 +922,71 @@ It's missing the three things thread safety needs:
 
 ---
 
+## Sub-topic 13 — Thread-Safe Design
+
+**Thread-safe** = behaves correctly when used by multiple threads at once (no data races, race conditions, or corrupted state). This is the **synthesis** of the whole topic — designing code safe by construction. Classic task: *"make this class thread-safe."*
+
+### Principle 1 — Identify the shared MUTABLE state, protect that
+Ask: *"what data is shared AND mutable?"* — only that needs protection.
+- **Shared + mutable** → synchronize (mutex/atomic).
+- **Immutable** (never changes after construction) → **always thread-safe**, no protection.
+- **Not shared** (each thread its own) → no protection.
+
+### Principle 2 — Protect the whole OPERATION, not each access
+Check-then-act (sub-topic 10) must be one critical section:
+```cpp
+// ❌ atomic balance, but a GAP between check and act → race condition
+std::atomic<int> balance;
+if (balance >= amt) balance -= amt;
+
+// ✅ whole check+act under one lock
+int balance; std::mutex m;
+{ std::lock_guard<std::mutex> lock(m); if (balance >= amt) balance -= amt; }
+```
+
+### Principle 3 — Encapsulate the lock (keep it internal)
+Private mutex; lock **inside** methods; callers don't know it exists.
+```cpp
+class Counter {
+    int value = 0;
+    mutable std::mutex m;                       // private detail; `mutable` → lockable in const methods
+public:
+    void increment() { std::lock_guard<std::mutex> lock(m); value++; }
+    int  get() const { std::lock_guard<std::mutex> lock(m); return value; }  // READS need the lock too!
+};
+```
+- **`mutable std::mutex`** — lock inside `const` methods (the Topic 2 `mutable` use).
+- **Reads need the lock too** — reading while another thread writes = data race.
+
+### Principle 4 — Keep critical sections small
+Lock only around the shared access, not slow unrelated work (sub-topic 4). Long locks kill parallelism + raise deadlock risk.
+
+### Principle 5 — Prefer immutability / confinement (best sync = no sharing)
+- **Immutable objects** are automatically thread-safe (no writes = no races).
+- **Confinement** — give each thread its own copy; nothing shared to protect. *(Browser model: confine an object to one sequence, pass messages, avoid locks — bonus-track edge.)*
+
+### Principle 6 — Beware the INTERFACE, not just the implementation
+Individually-safe methods can still race when **combined**:
+```cpp
+if (!stack.empty()) {   // A: not empty ✅
+    // ← B pops the last item HERE
+    stack.pop();        // A: pops empty → crash
+}
+```
+Check-then-act across two calls races. Fix: provide a **combined atomic operation** (e.g. `try_pop()` that checks+pops under one lock) instead of separate `empty()`+`pop()`.
+
+### Interview approach: "make this class thread-safe"
+1. Identify shared mutable state. 2. Add a **private mutex**. 3. Lock in **every** method touching it (incl. `const` reads → `mutable` mutex). 4. Protect **whole operations** (check-then-act under one lock). 5. Keep critical sections **small**. 6. Watch the **interface** (offer combined ops). 7. Consider **not sharing** at all (immutability/confinement).
+
+### Summary
+- Protect **shared mutable state** only; immutable/unshared needs nothing.
+- Protect **whole operations**, not single accesses.
+- **Encapsulate** the lock (private `mutable std::mutex`; lock reads too).
+- Small critical sections; prefer **immutability/confinement**.
+- **Interface-level** races: individually-safe methods can race when combined → provide combined atomic ops.
+
+---
+
 ## Code examples in this folder
 
 | File | Demonstrates |
@@ -928,3 +1000,4 @@ It's missing the three things thread safety needs:
 | `atomic_cas.cpp` | Counter race fixed with `std::atomic` (no mutex) + a **CAS retry loop** (atomically double a value across 10 threads → 1024) |
 | `shared_mutex_demo.cpp` | Reader-writer lock: 4 readers share the read lock concurrently; 1 writer takes the exclusive lock (no readers during writes) |
 | `call_once_demo.cpp` | 8 threads call `getResource()`; the initializer runs **exactly once** (first thread creates it, the rest reuse it) |
+| `thread_safe_counter.cpp` | A self-protecting `Counter` class: private `mutable mutex`, locked reads+writes, a combined `decrementIfPositive()` op → 10 threads → exactly 1,000,000 |
