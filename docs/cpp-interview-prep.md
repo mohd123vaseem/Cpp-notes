@@ -122,16 +122,17 @@ For every topic, your daily note should answer four things:
 - (Lighter: `std::forward`, perfect forwarding)
 - ⭐ Q: "What does std::move actually do?" / "Why are move semantics faster?" / "What is copy elision?"
 
-### 8. ⭐ STL: containers, complexity, iterator invalidation (3 days)
+### 8. ⭐ STL: containers, complexity, iterator invalidation (~3 days)
 - `vector`, `deque`, `list`, `map`, `unordered_map`, `set`, `unordered_set`, `stack`, `queue`, `priority_queue`
 - Internal implementation + complexity (vector = dynamic array; map = red-black tree O(log n); unordered_map = hash table O(1) avg)
 - When to use which
 - Iterator invalidation (which operations invalidate iterators — very commonly asked)
 - Iterator categories (input/forward/bidirectional/random)
 - **[ADDED]** Common algorithms: `sort`, `find`, `lower_bound`, `accumulate`, the remove-erase idiom
-- ⭐ Q: "map vs unordered_map — when and why?" / "When does a vector iterator get invalidated?" / "How is unordered_map implemented?"
+- **[ADDED]** ⭐ **Implement a container from scratch** — *web-verified as a real ask*: **Design HashMap** (LeetCode #706 — buckets + collision handling via separate chaining + resizing), and a **dynamic-array `vector`** (grow/reallocate/amortized O(1) push_back). Ties back to the "write it yourself" muscle from `SharedPtr`.
+- ⭐ Q: "map vs unordered_map — when and why?" / "When does a vector iterator get invalidated?" / "How is unordered_map implemented?" / "Implement a hashmap." / "How does vector grow?"
 
-### 9. ⭐ Concurrency & multithreading (~3 days — NOT a strength; teach thoroughly from basics)
+### 9. ⭐ Concurrency & multithreading (~3 days — NOT a strength; teach thoroughly from basics) ✅ DONE
 *Ordered basics → high-ROI. Deep memory model (memory_order, happens-before, false sharing) is in Tier 3 #14, not here.*
 
 **Part A — Fundamentals:**
