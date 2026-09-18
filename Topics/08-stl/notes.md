@@ -24,7 +24,7 @@ Tier 2 #8 (~3 days). You **use** STL daily via DSA, so the goal here is the **in
 |---|-----------|----------------------|--------|
 | 4 | ⭐ **Iterator invalidation** (which ops invalidate iterators) | "when does a vector iterator invalidate?" | ✅ Done |
 | 5 | **Iterator categories** (input/forward/bidirectional/random) | "what iterator does a list give?" | ✅ Done |
-| 6 | **Common algorithms** — `sort`, `find`, `lower_bound`, `accumulate`, **erase-remove idiom** | "how do you remove elements from a vector?" | ⬜ Pending |
+| 6 | **Common algorithms** — `sort`, `find`, `lower_bound`, `accumulate`, **erase-remove idiom** | "how do you remove elements from a vector?" | ✅ Done |
 
 ### Part C — Implement from scratch (verified real ask)
 | # | Sub-topic | The classic question | Status |
@@ -318,6 +318,98 @@ Output ──► (write-only branch)
 - 5 categories: **input/output → forward (multi-pass) → bidirectional (`--it`) → random-access (`it+n`, `it[i]`)**.
 - `vector`/`deque`/`array` = random-access; `list`/`map`/`set` = bidirectional; `forward_list`/`unordered_*` = forward.
 - Category flows from internals → explains no `list[5]`, no `std::sort` on `list` (use `list.sort()`), and each algorithm's minimum-iterator requirement.
+
+---
+
+## Sub-topic 6 — Common Algorithms + the Erase-Remove Idiom
+
+### `<algorithm>` works on ITERATOR RANGES, not containers
+Algorithms take `begin`/`end`, so the same one works on any container giving the right iterator category. Write once, use everywhere.
+
+### Algorithms to know cold
+```cpp
+std::sort(v.begin(), v.end());                        // O(n log n), random-access
+std::sort(v.begin(), v.end(), std::greater<int>());   // descending / custom comparator
+
+auto it = std::find(v.begin(), v.end(), 42);          // linear O(n), returns iter or end()
+
+// lower_bound/upper_bound: BINARY SEARCH on SORTED data, O(log n)
+auto lb = std::lower_bound(v.begin(), v.end(), 42);   // first element >= 42  (upper_bound: > 42)
+
+int sum = std::accumulate(v.begin(), v.end(), 0);     // <numeric>; fold. ⚠️ init type matters:
+                                                      //   on vector<double>, 0 → int → truncates! use 0.0
+```
+Others: `count`, `min_element`/`max_element`, `reverse`, `unique` (removes *consecutive* dups), `all_of`/`any_of`, `transform`, `copy`.
+
+> **What "idiom" means:** just "a standard, well-known way of doing something in a language" — a recognized pattern experienced programmers use and recognize instantly. Not a keyword or special C++ thing — plain English (like an idiom in a spoken language: a common phrase everyone knows). (RAII, pimpl are also "idioms.")
+
+### ⭐ The erase-remove idiom
+**Goal:** remove all elements equal to a value (or matching a condition) from a `vector`.
+
+> **Why erase-in-loop is O(n²) but the idiom is O(n)** — same `erase`, different usage:
+> ```cpp
+> // ❌ O(n²) — erase ONE element per iteration; each erase shifts the rest (O(n)), done k times
+> for (auto it = v.begin(); it != v.end(); )
+>     if (*it == 2) it = v.erase(it);   // repeated single-element erase → O(n) each → O(n²)
+>     else ++it;
+>
+> // ✅ O(n) — erase-remove idiom: ONE remove pass + ONE range erase (tail needs no shifting)
+> v.erase(std::remove(v.begin(), v.end(), 2), v.end());
+>
+> // ✅ O(n) — C++20 std::erase(v, 2): just a fancy one-call shortcut for the SAME idiom above
+> std::erase(v, 2);
+> ```
+> A single-element `erase(it)` shifts everything after it (O(n)); calling it in a loop → **O(n²)**. The idiom calls `erase` **once on the whole garbage range** (no shifting) after one O(n) `remove` pass → **O(n)**. `std::erase(v, 2)` (C++20) is just a cleaner way to write that same erase-remove combination — same O(n).
+
+**Naive erase-in-loop is O(n²)** (each `erase` shifts the rest) and invalidation-prone.
+
+**🔑 Key insight: `std::remove` does NOT remove.** Algorithms see only *iterators*, not the container — they **can't change its size**. `std::remove` **shifts the kept elements to the front** (overwriting unwanted ones) and **returns an iterator to the new logical end**; the tail is garbage, size **unchanged**.
+```cpp
+std::vector<int> v = {1, 2, 3, 2, 4, 2};
+auto newEnd = std::remove(v.begin(), v.end(), 2);
+// v: {1, 3, 4, ?, ?, ?}   size STILL 6; newEnd → after '4'
+```
+```
+Before:  1  2  3  2  4  2      size 6
+remove:  1  3  4  ?  ?  ?      size STILL 6, newEnd → after '4'
+              kept   garbage
+```
+**The idiom — pair `remove` with the container's `erase`** to chop the garbage tail:
+```cpp
+v.erase(std::remove(v.begin(), v.end(), 2), v.end());   // → {1,3,4}, size 3
+//       └── returns newEnd ──┘   └ erase newEnd..end
+```
+Inside-out: `remove` reorders + returns new end → `erase(newEnd, end())` deletes the tail. **O(n)**, correct.
+
+**Condition-based:** `v.erase(std::remove_if(v.begin(), v.end(), [](int x){return x%2==0;}), v.end());`
+
+**C++20 shortcut:** `std::erase(v, 2);` / `std::erase_if(v, pred);` (does the whole idiom in one call). Know both.
+
+### 🔑 So how can `erase` resize but `std::remove` can't? (free algorithm vs member)
+Different *kinds* of functions:
+```
+std::remove(v.begin(), v.end(), 2)
+            └──────┬──────┘
+            just two iterators — no `v`, no access to size/memory
+            → can only rearrange ELEMENTS, can't resize
+
+v.erase(newEnd, v.end())
+└┬┘
+ the container itself (this → v) — full access to size, capacity, buffer
+ → CAN change the size, free memory
+```
+- **`std::remove`** = **free algorithm** (`<algorithm>`) — receives **only iterators**, no handle on the container → can rearrange elements but **can't change size**. (Stays generic: one algorithm for vector/deque/array/raw.)
+- **`v.erase(...)`** = **member function** called **on the container** (`this` → `v`) → full access to its internals → **can resize / free memory.**
+> Rule: `std::something(...)` = free algorithm, iterators only, **can't resize**; `container.something(...)` = member, has the container, **can resize**. Resizing is container-specific → only members do it. That's *why* removal needs both steps.
+
+### ⭐ Interview gotcha: "what does `std::remove` do?"
+> It **can't actually remove** — algorithms only see iterators, not the container, so they can't change its size. It **shifts kept elements to the front and returns the new logical end**; size unchanged, tail garbage. To truly remove, pair with the container's `erase` — the **erase-remove idiom**.
+
+### Summary
+- Algorithms operate on **iterator ranges** → container-agnostic.
+- Know: `sort`, `find`, `lower_bound`/`upper_bound` (binary search on **sorted**), `accumulate` (watch init type).
+- **`std::remove` doesn't remove** — shifts kept elements, returns new end, size unchanged.
+- **Erase-remove idiom:** `v.erase(std::remove(...), v.end());` — O(n) correct bulk-remove. `remove_if` for conditions; C++20 `std::erase`/`erase_if`.
 
 ---
 
