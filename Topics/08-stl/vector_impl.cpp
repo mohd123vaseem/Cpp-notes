@@ -17,8 +17,8 @@ public:
         capacity = 0;
     }
     ~my_vector()
-    {   
-        delete []data;
+    {
+        delete[] data;
         data = nullptr;
         size = 0;
         capacity = 0;
@@ -27,27 +27,21 @@ public:
     void push_back(int val)
     {
 
-        int *temp = new int[size];
         if (capacity == size)
         {
             capacity = size * 2 + 1;
-            if (size != 0)
-            {
-                for (int i = 0; i < size; i++)
-                {
-                    temp[i] = data[i];
-                }
-                delete[] data;
-            }
-            data = new int[capacity];
+            int *temp = new int[capacity];
 
             for (int i = 0; i < size; i++)
             {
-                data[i] = temp[i];
+                temp[i] = data[i];
             }
+            delete[] data;
+
+            data = temp;
+
         }
 
-        delete[] temp;
         data[size] = val;
         size++;
     }
@@ -62,10 +56,12 @@ public:
         return data[index];
     }
 
-    int get_size(){
+    int get_size() const {
+    
         return size;
     }
-    int get_capacity(){
+    int get_capacity() const {
+    
         return capacity;
     }
 };
@@ -84,6 +80,6 @@ int main()
     {
         cout << v[i] << ",";
     }
-    v.~my_vector();
+    
     return 0;
 }
