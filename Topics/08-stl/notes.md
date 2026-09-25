@@ -471,6 +471,88 @@ void clear() { size = 0; }   // keep the buffer; just forget the elements
 - **Q2 (destructor double-free):** `clear()` freed the block but left `data` pointing at it; the destructor frees that **same already-freed block again** → corrupts the allocator's records → **double-free**, crash.
 - **Fixes:** null after delete (loud failure + safe re-delete), OR for `clear()` specifically, **don't free — just `size = 0`** (keep the buffer).
 
+### 💡 `return *this;` in `operator=` — what it is & why (chaining)
+
+**First: what `*this` is.** Inside any member function, `this` is a **pointer to the current object** (the one `operator=` was called on). So:
+- `this` → a *pointer* (`my_vector*`)
+- `*this` → the *object itself* (dereference the pointer → `my_vector`)
+
+`operator=` is declared to return `my_vector&` (a **reference** to a vector). So you return `*this` = "a reference to *this very object*." You're handing back the object that just got assigned to.
+```cpp
+my_vector& operator=(const my_vector& other) {
+    // ...do the assignment...
+    return *this;   // return a reference to THIS object (the one on the left of =)
+}
+```
+
+**Why return anything at all? → chaining.** "Chaining" means multiple assignments in one line:
+```cpp
+a = b = c;
+```
+Assignment is **right-associative**, so the compiler reads it as:
+```cpp
+a = (b = c);        // the (b = c) part happens FIRST
+```
+Step by step:
+1. **`b = c`** runs first → `b.operator=(c)`. It assigns `c` into `b`. **Then it returns `*this` — a reference to `b`.**
+2. Now the line becomes **`a = <the thing b=c returned>`** → `a = (reference to b)` → `a.operator=(b)`. Assigns `b` into `a`.
+
+**The key:** for step 2 to work, step 1 (`b = c`) must **return something** that `a` can then be assigned from — specifically, a reference to `b`. That "something" is exactly `return *this`. If `operator=` returned **nothing** (`void`), then `b = c` would produce no value, and `a = (nothing)` wouldn't compile.
+```
+a = b = c;
+        │
+        └─ b = c   → assigns c into b, returns reference to b ──┐
+                                                                │
+a = ◄───────────────────────────────────────────────────────────┘
+    (a = the reference b=c returned = b)  → assigns b into a
+```
+
+**Why a constructor doesn't need this:** a constructor doesn't return anything — it just *builds* an object; there's no chaining. Only `operator=` returns `*this`, because assignment is an **expression that can be chained**.
+
+**Bonus:** returning `*this` also lets assignment be used *as a value*: `if ((a = v).get_size() > 0) { ... }` — `(a = v)` returns a reference to `a`, so you can call a method on the result.
+
+> **One line:** `operator=` returns `my_vector&` so assignment can be **chained** (`a = b = c`). `this` is a pointer to the current object; `*this` is the object itself. `return *this` hands back a reference to the just-assigned object so `b = c` "evaluates to `b`" and can feed into `a = ...`. A constructor returns nothing because it builds an object rather than being a chainable expression.
+
+### 💡 Self-assignment guard: `this == &other`, NOT `*this == other` (identity vs content)
+The guard must check **identity** ("same object in memory?"), **not content** ("same values?") — these are different:
+- **Identity check** `this == &other` → compares **addresses** → true only when it's literally the **same object** (`a = a`). ✅ correct.
+- **Content check** `*this == other` → compares **values** (needs `operator==`, which you never defined → **won't compile**). And even if it did, it's the wrong meaning:
+```cpp
+my_vector a, b;
+a.push_back(5);
+b.push_back(5);   // EQUAL contents, but DIFFERENT objects (different addresses)
+a = b;            // NOT self-assignment — must actually copy!
+```
+With a content check, `a == b` is **true** (same values) → the guard would wrongly fire and **skip the real assignment** → bug. With `this == &other` (addresses differ), it correctly does **not** fire.
+> **Identity ≠ content.** Self-assignment = *same object* (compare addresses: `this == &other`), not *same values*.
+
+### 💡 Two meanings of `&` — why `return &other;` is wrong (not "return a reference")
+Same trap as `*` in Topic 2 — `&` means different things by position:
+- **In a TYPE (declaration) → "reference":** `const my_vector &other`, `my_vector& operator=(...)`. About how it's passed / what's returned.
+- **In an EXPRESSION → "address-of" (makes a POINTER):** `&other` = *the address of* `other` → a `my_vector*`, **not** a reference.
+
+So `return &other;` returns a **pointer** (address-of), not the reference you intended → wrong type (and wrong object). **To return by reference you write NO `&` in the return statement** — the **return type** `my_vector&` handles it; you just `return *this;` (the object itself, returned by reference).
+```cpp
+return *this;   // ✅ current object, returned BY REFERENCE (return type does it — no & needed)
+return &other;  // ❌ address-of → a POINTER, wrong type
+```
+> Rule: `&` in type-position = "reference"; `&` in expression-position = "address-of → pointer." Don't put `&` in the return statement to get a reference — the return type already makes it one.
+
+### 💡 Q: if `operator=` returned nothing (`void`), would `a = b;` still work?
+**Yes — a standalone `a = b;` would still work.** A single `a = b;` on its own line **doesn't use the return value** — it just calls `a.operator=(b)`, does the assignment, and discards whatever comes back (nothing, in the `void` case). No return value needed → `void` is fine for that case.
+
+**What DOES break with `void`** — only the cases that *use* the return value:
+```cpp
+a = b;                        // ✅ works even with void return — return value unused
+a = b = c;                    // ❌ breaks — needs (b=c) to yield 'b' so 'a =' can use it
+if ((a = b).get_size() > 0)   // ❌ breaks — needs (a=b) to yield an object to call a method on
+```
+- **Chaining** (`a = b = c`) needs `b = c` to *produce* `b` so `a` can be assigned from it.
+- **Assignment-as-expression** (`(a = b).something()`) needs the result to be an object.
+
+**So why bother with `return *this`?** Because the **built-in `=`** (for `int`, etc.) supports chaining and expression-use, and a well-behaved class should **match that behavior** — nobody expects `a = b = c` to fail on your type. It's about matching the real `=`, not about basic single assignment.
+> **In short:** `void` return → `a = b;` works, but `a = b = c;` and `(a=b).foo()` don't. `return *this` is for chaining / expression use, not for plain single assignment.
+
 ---
 
 ## Code examples in this folder
