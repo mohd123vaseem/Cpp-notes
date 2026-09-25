@@ -413,6 +413,66 @@ v.erase(newEnd, v.end())
 
 ---
 
+## Sub-topic 7 — Implement a `vector` (build-it-yourself, `vector_impl.cpp`)
+
+Building a dynamic array by hand: `data`/`size`/`capacity`, `push_back` with doubling reallocation, `operator[]`, `pop_back`/`back`/`front`/`empty`/`clear`, destructor, then Rule of 5 + templatize.
+
+### 💡 What `delete[]` really does, and why `clear()` must not free (memory deep-dive)
+
+**What `delete[] data` really does.** `delete[] data` does **NOT** wipe the memory or change the pointer. It does one thing:
+> **It returns that memory block to the allocator** (the heap manager) — marking it "free / available to hand out again." The bytes usually still hold the old values for a while, and `data` **still holds the same address number.**
+
+So after `delete[] data`:
+- The memory block is **no longer yours** — the allocator can give it to *any* future `new`/`new[]`.
+- `data` still points at that address (that's why it's called **dangling** — it points to memory you no longer own).
+- The old values might *still be sitting there* (not wiped) — which is exactly what makes the bug sneaky.
+
+**Analogy:** `delete[]` = **returning a library book.** The pointer `data` = a slip of paper with the shelf number written on it. After you return the book, the slip *still says "shelf 5"* — but the book there is no longer yours. The library can lend it to someone else.
+
+**Q1: "if someone writes `data[0] = 1` after clear, why is that a problem?"** Because **you don't own that memory anymore.** When you write `data[0] = 1`, you're writing to a block you already gave back. Two things can go wrong:
+1. **The allocator may have already handed that block to something else.** Another `new` somewhere in your program could now own those exact bytes. Your `data[0] = 1` **overwrites their data** → silent corruption of an unrelated object.
+2. **The allocator uses freed blocks for its own bookkeeping.** Heap managers store internal "free list" metadata *inside* freed blocks. Writing `data[0] = 1` can **corrupt the allocator's own records** → crashes later, in unrelated code.
+
+You're right that *right now*, immediately after free, the bytes might still be there and `data[0] = 1` might *appear* to work. **That's the trap** — it works by luck until the allocator reuses that block, then it silently breaks. That's **use-after-free**: touching (read *or* write) memory you've freed = undefined behavior.
+**Library analogy:** writing `data[0] = 1` = scribbling notes in a book you already returned — a book the library may have *already lent to someone else*. You're vandalizing someone else's book.
+
+**Q2: "the destructor knows `data` and deletes it again — why is that double-free bad?"** Trace it:
+```cpp
+void clear() {
+    delete[] data;   // returns the block to the allocator. data STILL holds the old address (not nulled!)
+    size = 0;
+}
+// ...later, object goes out of scope...
+~my_vector() {
+    delete[] data;   // ⚠️ data still holds that SAME (already-freed) address → frees it AGAIN
+}
+```
+Because `clear()` **didn't null `data`**, the pointer still holds the old address. So the destructor calls `delete[]` on the **same block that was already freed** → **double-free.**
+
+**Why double-free is bad:** the allocator keeps records of which blocks are allocated vs free. `delete[]` says "put this block back in the free pool." Doing it **twice** on the same block corrupts those records — e.g. the block ends up in the free list twice, so the allocator might later hand the *same* block to two different `new` calls → two objects silently sharing memory → chaos. It commonly crashes with "double free or corruption."
+**Library analogy:** double-free = trying to **return a book you already returned.** The librarian's records break — now the catalog thinks one book is in two places.
+
+**Why nulling after delete fixes both.** The safe pattern is: after `delete[]`, set the pointer to `nullptr`:
+```cpp
+delete[] data;
+data = nullptr;
+```
+- **Use-after-free:** `data[0] = 1` on `nullptr` crashes *immediately and loudly* (null deref) instead of silently corrupting — a reliable failure beats a hidden one.
+- **Double-free:** `delete[] nullptr` is a **guaranteed safe no-op** — so even if the destructor deletes again, freeing null does nothing. No double-free.
+
+**But for `clear()` specifically — don't free at all.** The *real* fix isn't "free and null" — it's **don't free the buffer at all.** Standard `clear()` keeps the buffer for reuse and just sets `size = 0`. No `delete[]`, no dangling, no double-free, and the buffer's ready for the next `push_back`. That's why the fix is simply:
+```cpp
+void clear() { size = 0; }   // keep the buffer; just forget the elements
+```
+
+**Summary:**
+- **`delete[]` doesn't wipe memory or reset the pointer** — it hands the block back to the allocator. The pointer keeps the old address (dangling); old values may linger.
+- **Q1 (writing after free):** you don't own that memory anymore — the allocator may have reused it (corrupt another object) or stored its own bookkeeping there (corrupt the heap). Works by luck until reused → **use-after-free**, UB.
+- **Q2 (destructor double-free):** `clear()` freed the block but left `data` pointing at it; the destructor frees that **same already-freed block again** → corrupts the allocator's records → **double-free**, crash.
+- **Fixes:** null after delete (loud failure + safe re-delete), OR for `clear()` specifically, **don't free — just `size = 0`** (keep the buffer).
+
+---
+
 ## Code examples in this folder
 
 | File | Demonstrates |

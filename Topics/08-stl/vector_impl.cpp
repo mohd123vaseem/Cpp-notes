@@ -39,11 +39,57 @@ public:
             delete[] data;
 
             data = temp;
-
         }
 
         data[size] = val;
         size++;
+    }
+
+    void pop_back()
+    {
+        if (size == 0)
+            return;
+
+        size--;
+
+        return;
+    }
+
+    int &back()
+    {
+
+        if (size == 0)
+        {
+
+            throw out_of_range("vector is impty");
+        }
+        return data[size - 1];
+    }
+
+    int &front()
+    {
+
+        if (size == 0)
+        {
+
+            throw out_of_range("vector is empty");
+        }
+        return data[0];
+    }
+
+    bool empty()
+    {
+
+        return (size == 0);
+    }
+
+    void clear()
+    {
+
+        // delete[] data; bcoz it will make data a dangling pointer.
+        size = 0;
+
+        return;
     }
 
     int &operator[](int index)
@@ -56,12 +102,14 @@ public:
         return data[index];
     }
 
-    int get_size() const {
-    
+    int get_size() const
+    {
+
         return size;
     }
-    int get_capacity() const {
-    
+    int get_capacity() const
+    {
+
         return capacity;
     }
 };
@@ -80,6 +128,31 @@ int main()
     {
         cout << v[i] << ",";
     }
-    
+
+    cout << "first ele : " << v.front() << endl;
+    cout << "last ele : " << v.back() << endl;
+    v.pop_back();
+    cout << "last ele after pop_back() : " << v.back() << endl;
+    cout << "is vector empty : " << v.empty() << endl;
+    v.clear();
+    try
+    {
+        cout << v.front();
+    }
+    catch (const out_of_range &e)
+    {
+        cout << "empty: " << e.what()<<endl;
+    }
+
+    try
+    {
+        cout << v.back();
+    }
+    catch (const out_of_range &e)
+    {
+        cout << "empty: " << e.what()<<endl;
+    }
+    cout << "size of vector " << v.get_size() << endl;
+
     return 0;
 }
