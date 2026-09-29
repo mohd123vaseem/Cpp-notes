@@ -234,6 +234,15 @@ For every topic, your daily note should answer four things:
 - Endianness basics
 - Q: "Why is this struct 24 bytes not 13?" / "How would you reduce its size?"
 
+### 17. Debugging & Tooling (2–3 days)
+
+- AddressSanitizer (ASan)
+- ThreadSanitizer (TSan)
+- UndefinedBehaviorSanitizer (UBSan)
+- Reading stack traces
+- gdb/lldb basics
+- Core dump basics
+
 ---
 
 ## PARALLEL TRACK A — DSA / coding rounds

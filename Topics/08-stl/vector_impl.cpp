@@ -38,7 +38,8 @@ public:
     my_vector &operator=(const my_vector &other)
     {
 
-        if (this == &other)return *this;
+        if (this == &other)
+            return *this;
         delete[] data;
         size = other.size;
         capacity = other.capacity;
@@ -49,6 +50,30 @@ public:
         }
 
         return *this;
+    }
+
+    // MOVE CONSTRUCTOR — target is brand new, nothing to free
+    my_vector(my_vector &&other) noexcept
+    {
+        data = other.data; // steal
+        size = other.size;
+        capacity = other.capacity;
+        other.data = nullptr; // null the source
+        other.size = other.capacity = 0;
+    }
+
+    // MOVE ASSIGNMENT — target already owns a buffer
+    my_vector &operator=(my_vector &&other) noexcept
+    {
+        if (this == &other)
+            return *this;  // 1. self-check       ← extra
+        delete[] data;     // 2. free OUR old buffer  ← extra
+        data = other.data; // 3. steal (same as ctor)
+        size = other.size;
+        capacity = other.capacity;
+        other.data = nullptr; // 4. null the source (same as ctor)
+        other.size = other.capacity = 0;
+        return *this; // 5. return *this     ← extra
     }
 
     void push_back(int val)
@@ -134,6 +159,7 @@ public:
 
         return size;
     }
+
     int get_capacity() const
     {
 
@@ -190,17 +216,40 @@ int main()
     {
         cout << vec[i] << ",";
     }
-    cout<<endl;
+    cout << endl;
 
     // Copy Assignment
     my_vector nums;
     nums = vec;
-    nums[0]=1000;
+    nums[0] = 1000;
     cout << " Copy Assignment vector nums  : ";
     for (int i = 0; i < nums.get_size(); i++)
     {
         cout << nums[i] << ",";
     }
+    cout << " vec[0] to prove deep copy  : " << vec[0] << endl;
+    
+    //move constructor.
+    my_vector x = move(vec);
+    //my_vector x(move(vec));
+    cout << " move constructor for vector x : ";
+    for (int i = 0; i < x.get_size(); i++)
+    {
+        cout << x[i] << ",";
+    }
+    cout<<endl;
+    cout<<"vec's size and capacity"<<vec.get_size()<<","<<vec.get_capacity()<<endl;
+
+    //move Assignment.
+    my_vector y ;
+    y = move(x);
+    cout << " move Assignment for vector x : ";
+    for (int i = 0; i < y.get_size(); i++)
+    {
+        cout << y[i] << ",";
+    }
+    cout<<endl;
+    cout<<"X's size and capacity"<<x.get_size()<<","<<x.get_capacity()<<endl;
 
     return 0;
 }
