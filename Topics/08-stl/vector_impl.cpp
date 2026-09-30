@@ -1,11 +1,12 @@
 #include <iostream>
 
 using namespace std;
+template <typename T>
 
 class my_vector
 {
 private:
-    int *data;
+    T *data;
     int size;
     int capacity;
 
@@ -29,7 +30,7 @@ public:
     {
         size = other.size;
         capacity = other.capacity;
-        data = new int[capacity]; // ✅ allocate OUR OWN buffer
+        data = new T[capacity]; // ✅ allocate OUR OWN buffer
         for (int i = 0; i < size; i++)
             data[i] = other.data[i]; // ✅ copy the ELEMENTS, not the pointer
     }
@@ -43,7 +44,7 @@ public:
         delete[] data;
         size = other.size;
         capacity = other.capacity;
-        data = new int[capacity];
+        data = new T[capacity];
         for (int i = 0; i < size; i++)
         {
             data[i] = other.data[i];
@@ -76,13 +77,13 @@ public:
         return *this; // 5. return *this     ← extra
     }
 
-    void push_back(int val)
+    void push_back(T val)
     {
 
         if (capacity == size)
         {
             capacity = size * 2 + 1;
-            int *temp = new int[capacity];
+            T *temp = new T[capacity];
 
             for (int i = 0; i < size; i++)
             {
@@ -107,7 +108,7 @@ public:
         return;
     }
 
-    int &back()
+    T &back()
     {
 
         if (size == 0)
@@ -118,7 +119,7 @@ public:
         return data[size - 1];
     }
 
-    int &front()
+    T &front()
     {
 
         if (size == 0)
@@ -144,7 +145,7 @@ public:
         return;
     }
 
-    int &operator[](int index)
+    T &operator[](int index)
     {
 
         if (index >= size)
@@ -170,7 +171,7 @@ public:
 int main()
 {
     /* code */
-    my_vector v;
+    my_vector<int> v;
 
     for (int i = 1; i < 5; i++)
     {
@@ -219,7 +220,7 @@ int main()
     cout << endl;
 
     // Copy Assignment
-    my_vector nums;
+    my_vector<int> nums;
     nums = vec;
     nums[0] = 1000;
     cout << " Copy Assignment vector nums  : ";
@@ -228,28 +229,43 @@ int main()
         cout << nums[i] << ",";
     }
     cout << " vec[0] to prove deep copy  : " << vec[0] << endl;
-    
-    //move constructor.
+
+    // move constructor.
     my_vector x = move(vec);
-    //my_vector x(move(vec));
+    // my_vector x(move(vec));
     cout << " move constructor for vector x : ";
     for (int i = 0; i < x.get_size(); i++)
     {
         cout << x[i] << ",";
     }
-    cout<<endl;
-    cout<<"vec's size and capacity"<<vec.get_size()<<","<<vec.get_capacity()<<endl;
+    cout << endl;
+    cout << "vec's size and capacity" << vec.get_size() << "," << vec.get_capacity() << endl;
 
-    //move Assignment.
-    my_vector y ;
+    // move Assignment.
+    my_vector<int> y;
     y = move(x);
     cout << " move Assignment for vector x : ";
     for (int i = 0; i < y.get_size(); i++)
     {
         cout << y[i] << ",";
     }
-    cout<<endl;
-    cout<<"X's size and capacity"<<x.get_size()<<","<<x.get_capacity()<<endl;
+    cout << endl;
+    cout << "X's size and capacity" << x.get_size() << "," << x.get_capacity() << endl;
+
+    cout << "---------------TEMPLATE-TEST-----------------------" << endl;
+
+    my_vector<string> st;
+
+    st.push_back("vaz");
+    st.push_back("naz");
+    st.push_back("jazz");
+    
+    cout << "vector of string : ";
+
+    for (int i = 0; i < st.get_size(); i++)
+    {
+        cout << st[i] << " , ";
+    }
 
     return 0;
 }

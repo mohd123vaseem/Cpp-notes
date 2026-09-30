@@ -29,7 +29,7 @@ Tier 2 #8 (~3 days). You **use** STL daily via DSA, so the goal here is the **in
 ### Part C — Implement from scratch (verified real ask)
 | # | Sub-topic | The classic question | Status |
 |---|-----------|----------------------|--------|
-| 7 | ⭐ **Implement a dynamic-array `vector`** (grow/reallocate, amortized O(1) push_back) | "how does vector grow?" / "implement vector" | ⬜ Pending |
+| 7 | ⭐ **Implement a dynamic-array `vector`** (grow/reallocate, amortized O(1) push_back) | "how does vector grow?" / "implement vector" | ✅ Done — `vector_impl.cpp` (templated, Rule of 5) |
 | 8 | ⭐ **Design HashMap** (buckets + separate chaining + resizing) | "implement a hashmap" | ⬜ Pending |
 
 ---
@@ -560,3 +560,4 @@ if ((a = b).get_size() > 0)   // ❌ breaks — needs (a=b) to yield an object t
 | File | Demonstrates |
 |------|--------------|
 | `iterator_invalidation.cpp` | `vector` reallocation dangling a pointer; the erase-in-loop bug + the `it = erase(it)` fix |
+| `vector_impl.cpp` | **Hand-written `my_vector<T>`**: size/capacity, doubling reallocation, full **Rule of 5** (deep copy + move-steal), `push_back`/`pop_back`/`back`/`front`/`empty`/`clear`/`operator[]`; tested with `int` and `string` |
