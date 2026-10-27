@@ -30,7 +30,7 @@ Tier 2 #8 (~3 days). You **use** STL daily via DSA, so the goal here is the **in
 | # | Sub-topic | The classic question | Status |
 |---|-----------|----------------------|--------|
 | 7 | ⭐ **Implement a dynamic-array `vector`** (grow/reallocate, amortized O(1) push_back) | "how does vector grow?" / "implement vector" | ✅ Done — `vector_impl.cpp` (templated, Rule of 5) |
-| 8 | ⭐ **Design HashMap** (buckets + separate chaining + resizing) | "implement a hashmap" | ⬜ Pending |
+| 8 | ⭐ **Design HashMap** (buckets + separate chaining + resizing) | "implement a hashmap" | ✅ Done — `hashmap_impl.cpp` (chaining) · resizing = ⬜ TODO (free time) |
 
 ---
 
@@ -555,9 +555,79 @@ if ((a = b).get_size() > 0)   // ❌ breaks — needs (a=b) to yield an object t
 
 ---
 
+## Sub-topic 8 — Design HashMap (build-it-yourself, `hashmap_impl.cpp`)
+
+LeetCode #706. Brings together `unordered_map` internals: **buckets + hash function + collision handling (separate chaining)** (+ resizing, below).
+
+### How a hashmap works
+Turn a key into an array index via a **hash function** → store the (key,value) there → O(1) average lookup:
+```
+key ──hash(key)──► number ──% numBuckets──► index into the bucket array
+```
+
+### The collision problem (why Stage 1's "one entry per bucket" fails)
+Two different keys can hash to the **same bucket** (e.g. `1 % 10` and `11 % 10` both = bucket 1). A one-slot-per-bucket design would **drop** the second key or return the wrong value. → need collision handling.
+
+### Separate chaining (the fix)
+**Each bucket is a LIST of (key,value) pairs.** Colliding keys coexist in the same bucket's list. Hashing gets you to the right **bucket**; then you **linearly scan that (short) list** for the exact key.
+```cpp
+vector<list<pair<int,int>>> buckets;   // numBuckets buckets, each a list of (key,value)
+
+void put(int key, int value) {
+    auto& chain = buckets[key % numBuckets];
+    for (auto& [k, v] : chain) if (k == key) { v = value; return; }  // update if exists
+    chain.push_back({key, value});                                   // else append
+}
+int get(int key) {
+    for (auto& [k, v] : buckets[key % numBuckets]) if (k == key) return v;
+    return -1;                                                       // not found (LC convention)
+}
+void remove(int key) {
+    auto& chain = buckets[key % numBuckets];
+    for (auto it = chain.begin(); it != chain.end(); ++it)
+        if (it->first == key) { chain.erase(it); break; }           // iterator erase + break
+}
+```
+Store **key-value pairs** (not just values) — with multiple keys per bucket, you must know *which* key an entry belongs to. Colliding keys (1 and 11) now work independently.
+
+### ⬜ TODO (for free time): Resizing / rehashing — keeps it O(1) as it grows
+**The problem:** fixed `numBuckets` (e.g. 10) + many keys → long chains → `get` scans a long list → **O(n), not O(1)**. (1000 keys / 10 buckets ≈ 100 per chain.)
+
+**The fix — resize when the load factor gets high:**
+- **Load factor** = `size / numBuckets` (avg entries per bucket). Real maps grow when it exceeds a threshold (e.g. **0.75**).
+- Steps:
+  1. Track total entry count `size` (increment on insert, decrement on remove).
+  2. After each `put`, check `size / numBuckets > 0.75`.
+  3. If so: allocate a **bigger** bucket array (e.g. **double** numBuckets), **rehash** every existing pair into it — ⚠️ each pair's index **changes** because it's `key % NEW_numBuckets` now — then replace the old array.
+- This keeps chains short → lookups stay **O(1) average**. Common interview follow-up: *"how do you keep it O(1) as it grows?"* → "resize + rehash at a load-factor threshold."
+
+**Sketch:**
+```cpp
+void rehash() {
+    int newCount = numBuckets * 2;
+    vector<list<pair<int,int>>> newBuckets(newCount);
+    for (auto& chain : buckets)
+        for (auto& [k, v] : chain)
+            newBuckets[k % newCount].push_back({k, v});   // re-index with NEW bucket count
+    buckets = move(newBuckets);
+    numBuckets = newCount;
+}
+// in put(), after inserting a NEW key: if ((double)size / numBuckets > 0.75) rehash();
+```
+*(Also a natural extension: templatize to `MyHashMap<K,V>` with a generic hash — real `unordered_map` takes a `Hash` functor. For non-int keys you'd need `std::hash<K>`.)*
+
+### Summary
+- Hashmap = **hash(key) % numBuckets → index**; O(1) average.
+- **Collisions** (different keys, same bucket) handled by **separate chaining** (bucket = list of (key,value); scan the short list for the exact key).
+- Store **key-value pairs** so colliding keys are distinguishable.
+- **Resizing/rehashing** (TODO) keeps chains short → preserves O(1) as it grows: grow + rehash when load factor > ~0.75.
+
+---
+
 ## Code examples in this folder
 
 | File | Demonstrates |
 |------|--------------|
 | `iterator_invalidation.cpp` | `vector` reallocation dangling a pointer; the erase-in-loop bug + the `it = erase(it)` fix |
 | `vector_impl.cpp` | **Hand-written `my_vector<T>`**: size/capacity, doubling reallocation, full **Rule of 5** (deep copy + move-steal), `push_back`/`pop_back`/`back`/`front`/`empty`/`clear`/`operator[]`; tested with `int` and `string` |
+| `hashmap_impl.cpp` | **Design HashMap** (LeetCode #706): buckets + hash + **separate chaining** for collisions; `put`/`get`/`remove`; colliding keys (1 & 11) work independently. *(resizing/rehashing = documented TODO)* |

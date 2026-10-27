@@ -67,7 +67,7 @@ For every topic, your daily note should answer four things:
 - **[MERGED]** ⭐ **Write a basic `shared_ptr` from scratch** — a classic whiteboard ask
 - ⭐ Q: "unique vs shared vs weak ptr?" / "How does shared_ptr's refcount work?" / "What's a shared_ptr cycle and how does weak_ptr fix it?"
 
-### 4. ⭐ OOP + polymorphism + vtables (3 days)
+### 4. ⭐ OOP + polymorphism + vtables (3 days) ✅ DONE
 *Ordered basics → high-ROI. SOLID + design patterns are deliberately NOT here — they're LLD-round material in Parallel Track B, a separate interview type.*
 
 **Part A — Fundamentals (clear the basics fast):**
@@ -89,7 +89,7 @@ For every topic, your daily note should answer four things:
 - **[MERGED]** **pimpl idiom** (pointer-to-implementation) — hides implementation, cuts build dependencies; ties to compilation model (#15)
 - ⭐ Q: "What are the 4 pillars?" / "Overloading vs overriding?" / "How do virtual functions work under the hood?" / "Why does a polymorphic base class need a virtual destructor?" / "What is object slicing?" / "Composition vs inheritance — when each?"
 
-### 5. ⭐ Constructors/destructors + Rule of 0/3/5 (2 days) — *do this NEXT (you just built Rule of 3 by hand)*
+### 5. ⭐ Constructors/destructors + Rule of 0/3/5 (2 days) ✅ DONE
 - Default, parameterized, copy, move constructors; destructor
 - Copy constructor vs copy assignment; move constructor vs move assignment
 - Deep vs shallow copy
@@ -98,7 +98,7 @@ For every topic, your daily note should answer four things:
 - `explicit` keyword
 - ⭐ Q: "Explain the Rule of Three/Five." / "When is the copy constructor called vs assignment?" / "Write a class that manages a raw pointer correctly."
 
-### 6. ⭐ [ADDED] The four casts (2 days)
+### 6. ⭐ [ADDED] The four casts (2 days) ✅ DONE
 *Asked constantly — surprised this wasn't already in. Pairs naturally with Tier 1.*
 - `static_cast` — compile-time, related types
 - `dynamic_cast` — runtime, polymorphic downcasts (needs RTTI, returns nullptr/throws)
@@ -122,7 +122,7 @@ For every topic, your daily note should answer four things:
 - (Lighter: `std::forward`, perfect forwarding)
 - ⭐ Q: "What does std::move actually do?" / "Why are move semantics faster?" / "What is copy elision?"
 
-### 8. ⭐ STL: containers, complexity, iterator invalidation (~3 days)
+### 8. ⭐ STL: containers, complexity, iterator invalidation (~3 days) ✅ DONE
 - `vector`, `deque`, `list`, `map`, `unordered_map`, `set`, `unordered_set`, `stack`, `queue`, `priority_queue`
 - Internal implementation + complexity (vector = dynamic array; map = red-black tree O(log n); unordered_map = hash table O(1) avg)
 - When to use which
