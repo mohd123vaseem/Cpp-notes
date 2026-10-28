@@ -22,7 +22,7 @@ Templates are how C++ does **generic programming** — write code once that work
 |---|-----------|----------------------|--------|
 | 4 | **Template specialization** (full + partial) | "What is template specialization?" | ⬜ Pending |
 | 5 | **Non-type params + variadic templates** | "What's a variadic template?" | ⬜ Pending |
-| 6 | **`auto` & `decltype`** (type deduction) | "auto vs decltype?" | ⬜ Pending |
+| 6 | **`auto` & `decltype`** (type deduction) | "auto vs decltype?" | ✅ Done |
 | 7 | **Concepts (C++20)** — constraining templates | "How do you constrain a template?" | ⬜ Pending |
 
 ### Part C — Advanced (lighter — read/recognize, not master)
@@ -231,8 +231,77 @@ This violates the **One Definition Rule (ODR):** you may **declare** a name as m
 
 ---
 
+## Sub-topic 6 — `auto` & `decltype` (type deduction)
+
+### `auto` — "compiler, figure out the type"
+Omit the type; the compiler **deduces** it from the initializer (still a fixed static type — just not spelled out):
+```cpp
+auto x = 5;          // int
+auto y = 3.14;       // double
+auto it = myMap.begin();              // the iterator type — no need to spell it out
+auto f = [](int x){ return x*2; };    // a lambda — its type is UNNAMEABLE; auto is the only way
+```
+
+### The WHY
+1. **Verbose types** — `std::vector<std::pair<int,std::string>>::iterator` → just `auto it = ...` (type is obvious from the RHS).
+2. **Unnameable types** — lambdas have compiler-generated types you can't write → `auto` is required.
+3. **Maintainability** — adapts if a return type changes; avoids silent wrong-type conversions.
+
+### ⚠️ Key gotcha: `auto` STRIPS `const` and `&` (gives a value copy)
+```cpp
+const int ci = 5;
+auto a = ci;      // int (NOT const int!) — const dropped; a is a copy
+
+int x = 10; int& ref = x;
+auto b = ref;     // int (NOT int&!) — reference dropped; b is a COPY
+b = 99;           // changes b, NOT x
+```
+Keep them explicitly:
+```cpp
+const auto  a = ci;    // const int
+auto&       b = ref;   // int&  (now b IS x)
+const auto& c = ci;    // const int&  (no copy, read-only)
+```
+**Range-for:** prefer **`const auto&`** for non-trivial types (no copy, read-only); `auto&` to modify; plain `auto` copies each element (wasteful).
+```cpp
+for (const auto& x : container)   // usual safe default — no copy
+```
+
+### `decltype(expr)` — the EXACT declared type (keeps `const`/`&`)
+```cpp
+int x = 5;             decltype(x)   a;   // int
+const int ci = 5;      decltype(ci)  b = 20;  // const int   (KEEPS const — unlike auto)
+int& ref = x;          decltype(ref) c = x;   // int&        (KEEPS reference)
+```
+
+### auto vs decltype
+| | `auto` | `decltype` |
+|---|---|---|
+| Deduces from | the **initializer value** | an **expression's declared type** |
+| `const`/`&` | **stripped** (plain value copy) | **preserved** (exact) |
+| Use for | locals, iterators, lambdas, range-for | generic code needing the *precise* type / computed return types |
+
+Classic `decltype` use — return type depends on args:
+```cpp
+template <typename A, typename B>
+auto add(A a, B b) -> decltype(a + b) { return a + b; }   // add(3, 2.5) → double
+```
+*(C++14+: just `auto add(A,B)` deduces the return type from `return` — often no explicit decltype needed.)*
+
+### Guidance
+- Use **`auto`** freely where the type is clear (iterators, lambdas); don't overuse where it hurts readability.
+- Prefer **`const auto&`** in loops over non-trivial types.
+- **`decltype`** is mostly a generic-programming tool — you'll *read* it more than write it.
+
+### Summary
+- **`auto`** = deduce a variable's type from its initializer; **strips `const`/`&`** → value copy by default (keep with `const auto&`, `auto&`).
+- **`decltype(expr)`** = exact declared type, **preserves `const`/`&`**; for generic code / computed return types.
+- **auto = convenient value deduction (strips qualifiers); decltype = exact type query (keeps them).**
+
+---
+
 ## Code examples in this folder
 
 | File | Demonstrates |
 |------|--------------|
-| _(added as we go)_ | |
+| `auto_decltype.cpp` | `auto` strips `const`/`&` (modifying the copy leaves the original unchanged); `auto&` keeps the ref; `decltype` preserves `const`/`&`; `decltype` computed return type |
